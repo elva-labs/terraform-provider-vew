@@ -35,6 +35,7 @@ type OAuthTokenSource struct {
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+	flight   *oauthRefresh
 }
 
 // NewOAuthTokenSource creates a token source for an absolute HTTP(S) token URL.
@@ -66,47 +67,78 @@ type oauthTokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 }
 
+type oauthRefresh struct {
+	done  chan struct{}
+	token string
+	err   error
+}
+
 // Token returns a cached token when it has more than 30 seconds remaining;
 // otherwise it obtains and caches a fresh token.
 func (s *OAuthTokenSource) Token(ctx context.Context, forceRefresh bool) (string, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !forceRefresh && s.token != "" && s.tokenExp.Sub(s.now()) > expirySkew {
-		return s.token, nil
+		token := s.token
+		s.mu.Unlock()
+		return token, nil
 	}
+	if s.flight != nil {
+		flight := s.flight
+		s.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.token, flight.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	flight := &oauthRefresh{done: make(chan struct{})}
+	s.flight = flight
+	s.mu.Unlock()
 
+	token, expiry, err := s.refresh(ctx)
+	s.mu.Lock()
+	if err == nil {
+		s.token = token
+		s.tokenExp = expiry
+	}
+	flight.token = token
+	flight.err = err
+	s.flight = nil
+	close(flight.done)
+	s.mu.Unlock()
+	return token, err
+}
+
+func (s *OAuthTokenSource) refresh(ctx context.Context) (string, time.Time, error) {
 	form := url.Values{
 		"grant_type": {"client_credentials"},
 		"scope":      {oauthScope},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", errors.New("oauth token request could not be created")
+		return "", time.Time{}, errors.New("oauth token request could not be created")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(s.clientID, s.clientSecret)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", errors.New("oauth token request failed")
+		return "", time.Time{}, errors.New("oauth token request failed")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("oauth token endpoint returned status %s", resp.Status)
+		return "", time.Time{}, fmt.Errorf("oauth token endpoint returned status %d", resp.StatusCode)
 	}
 	var token oauthTokenResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, responseBodyLimit)).Decode(&token); err != nil {
-		return "", fmt.Errorf("oauth token response decoding failed: %w", err)
+		return "", time.Time{}, fmt.Errorf("oauth token response decoding failed: %w", err)
 	}
 	if token.AccessToken == "" {
-		return "", errors.New("oauth token response missing access_token")
+		return "", time.Time{}, errors.New("oauth token response missing access_token")
 	}
 	if token.ExpiresIn <= 0 {
-		return "", errors.New("oauth token response has invalid expires_in")
+		return "", time.Time{}, errors.New("oauth token response has invalid expires_in")
 	}
-
-	s.token = token.AccessToken
-	s.tokenExp = s.now().Add(time.Duration(token.ExpiresIn) * time.Second)
-	return s.token, nil
+	return token.AccessToken, s.now().Add(time.Duration(token.ExpiresIn) * time.Second), nil
 }

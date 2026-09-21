@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -127,6 +128,98 @@ func TestOAuthTokenSourceReturnsSafeError(t *testing.T) {
 	_, err = source.Token(context.Background(), false)
 	if err == nil || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "client-secret") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestOAuthTokenSourceStatusErrorExcludesServerControlledReason(t *testing.T) {
+	secret := "status-reason-secret"
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 " + secret,
+			Body:       io.NopCloser(strings.NewReader("ignored")),
+			Header:     make(http.Header),
+			Request:    r,
+		}, nil
+	})}
+	source, err := NewOAuthTokenSource("https://example.com/token", "id", "secret", httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = source.Token(context.Background(), false)
+	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "502") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestOAuthTokenSourceConcurrentCallersShareRefresh(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	secondStarted := make(chan struct{})
+	var calls atomic.Int32
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 2 {
+			close(secondStarted)
+		}
+		close(started)
+		<-release
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(`{"access_token":"shared","expires_in":120}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	source, err := NewOAuthTokenSource("https://example.com/token", "id", "secret", httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan string, 2)
+	errs := make(chan error, 2)
+	go func() { token, err := source.Token(context.Background(), false); results <- token; errs <- err }()
+	<-started
+	go func() { token, err := source.Token(context.Background(), false); results <- token; errs <- err }()
+	select {
+	case <-secondStarted:
+		t.Fatal("started a second refresh")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		if token := <-results; token != "shared" {
+			t.Fatalf("token = %q", token)
+		}
+	}
+}
+
+func TestOAuthTokenSourceCancelledWaiterReturnsBeforeRefreshCompletes(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		close(started)
+		<-release
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(`{"access_token":"shared","expires_in":120}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	source, err := NewOAuthTokenSource("https://example.com/token", "id", "secret", httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() { _, err := source.Token(context.Background(), false); firstDone <- err }()
+	<-started
+	ctx, cancel := context.WithCancel(context.Background())
+	waiterDone := make(chan error, 1)
+	go func() { _, err := source.Token(ctx, false); waiterDone <- err }()
+	cancel()
+	select {
+	case err := <-waiterDone:
+		if err == nil {
+			t.Fatal("cancelled waiter returned nil error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled waiter did not return before refresh completed")
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
 	}
 }
 
