@@ -3,8 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	cryptorand "crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 )
 
 const clientResponseBodyLimit = 2 << 20
@@ -63,7 +62,7 @@ func New(config Config) (*Client, error) {
 		tokens:         tokens,
 		maxAttempts:    4,
 		sleep:          sleepContext,
-		idempotencyKey: newUUID,
+		idempotencyKey: func() string { return uuid.New().String() },
 	}, nil
 }
 
@@ -81,7 +80,15 @@ func (c *Client) CreateComponent(ctx context.Context, projectID string, input Cr
 	if err != nil {
 		return "", errors.New("VEW component create request could not be encoded")
 	}
-	response, err := c.request(ctx, http.MethodPost, c.componentURL(projectID, ""), body, c.idempotencyKey())
+	endpoint, err := c.componentURL(projectID, "", false)
+	if err != nil {
+		return "", err
+	}
+	idempotencyKey := c.idempotencyKey()
+	if idempotencyKey == "" {
+		return "", errors.New("VEW component idempotency key could not be generated")
+	}
+	response, err := c.request(ctx, http.MethodPost, endpoint, body, idempotencyKey)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +114,11 @@ func (c *Client) CreateComponent(ctx context.Context, projectID string, input Cr
 
 // GetComponent fetches one component.
 func (c *Client) GetComponent(ctx context.Context, projectID, componentID string) (Component, error) {
-	response, err := c.request(ctx, http.MethodGet, c.componentURL(projectID, componentID), nil, "")
+	endpoint, err := c.componentURL(projectID, componentID, true)
+	if err != nil {
+		return Component{}, err
+	}
+	response, err := c.request(ctx, http.MethodGet, endpoint, nil, "")
 	if err != nil {
 		return Component{}, err
 	}
@@ -133,33 +144,60 @@ func (c *Client) UpdateComponent(ctx context.Context, projectID, componentID str
 	if err != nil {
 		return errors.New("VEW component update request could not be encoded")
 	}
-	_, err = c.request(ctx, http.MethodPut, c.componentURL(projectID, componentID), body, "")
+	endpoint, err := c.componentURL(projectID, componentID, true)
+	if err != nil {
+		return err
+	}
+	_, err = c.request(ctx, http.MethodPut, endpoint, body, "")
 	return err
 }
 
 // ArchiveComponent archives a component. A missing component is already archived.
 func (c *Client) ArchiveComponent(ctx context.Context, projectID, componentID string) error {
-	_, err := c.request(ctx, http.MethodDelete, c.componentURL(projectID, componentID), nil, "")
+	endpoint, err := c.componentURL(projectID, componentID, true)
+	if err != nil {
+		return err
+	}
+	_, err = c.request(ctx, http.MethodDelete, endpoint, nil, "")
 	if IsNotFound(err) {
 		return nil
 	}
 	return err
 }
 
-func (c *Client) componentURL(projectID, componentID string) string {
-	parts := []string{"projects", projectID, "components"}
-	if componentID != "" {
-		parts = append(parts, componentID)
+func (c *Client) componentURL(projectID, componentID string, item bool) (string, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return "", errors.New("VEW project ID must not be empty")
 	}
-	u := c.baseURL.JoinPath(parts...)
-	return u.String()
+	if item && strings.TrimSpace(componentID) == "" {
+		return "", errors.New("VEW component ID must not be empty")
+	}
+	segments := []string{"projects", projectID, "components"}
+	if item {
+		segments = append(segments, componentID)
+	}
+	basePath := strings.TrimSuffix(c.baseURL.Path, "/")
+	rawPath := strings.TrimSuffix(c.baseURL.EscapedPath(), "/")
+	for _, segment := range segments {
+		basePath += "/" + segment
+		rawPath += "/" + escapePathSegment(segment)
+	}
+	u := *c.baseURL
+	u.Path = basePath
+	u.RawPath = rawPath
+	return u.String(), nil
+}
+
+func escapePathSegment(value string) string {
+	return strings.ReplaceAll(url.PathEscape(value), ".", "%2E")
 }
 
 func (c *Client) request(ctx context.Context, method, endpoint string, body []byte, idempotencyKey string) ([]byte, error) {
 	forceRefresh := false
 	refreshed := false
 	var lastErr error
-	for attempt := 0; attempt < c.maxAttempts; attempt++ {
+	transientAttempt := 0
+	for {
 		token, err := c.tokens.Token(ctx, forceRefresh)
 		if err != nil {
 			return nil, errors.New("VEW API authentication failed")
@@ -183,25 +221,30 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body []by
 				_ = resp.Body.Close()
 			}
 			lastErr = errors.New("VEW API request failed")
-			shouldRetry, retryErr := c.retry(ctx, attempt, nil)
+			shouldRetry, retryErr := c.retry(ctx, transientAttempt, nil)
 			if retryErr != nil {
 				return nil, retryErr
 			}
 			if !shouldRetry {
 				return nil, lastErr
 			}
+			transientAttempt++
 			continue
 		}
 		responseBody, readErr := readResponseBody(resp.Body)
 		if readErr != nil {
 			lastErr = readErr
-			shouldRetry, retryErr := c.retry(ctx, attempt, nil)
+			if errors.Is(readErr, errResponseBodyTooLarge) {
+				return nil, lastErr
+			}
+			shouldRetry, retryErr := c.retry(ctx, transientAttempt, nil)
 			if retryErr != nil {
 				return nil, retryErr
 			}
 			if !shouldRetry {
 				return nil, lastErr
 			}
+			transientAttempt++
 			continue
 		}
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
@@ -217,15 +260,15 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body []by
 			}
 			return nil, lastErr
 		}
-		shouldRetry, retryErr := c.retry(ctx, attempt, &response{header: resp.Header, status: resp.StatusCode, apiErr: apiErr})
+		shouldRetry, retryErr := c.retry(ctx, transientAttempt, &response{header: resp.Header, status: resp.StatusCode, apiErr: apiErr})
 		if retryErr != nil {
 			return nil, retryErr
 		}
 		if !shouldRetry {
 			return nil, lastErr
 		}
+		transientAttempt++
 	}
-	return nil, lastErr
 }
 
 type response struct {
@@ -233,6 +276,8 @@ type response struct {
 	status int
 	apiErr *APIError
 }
+
+var errResponseBodyTooLarge = errors.New("VEW API response exceeds size limit")
 
 func readResponseBody(body io.ReadCloser) ([]byte, error) {
 	defer body.Close()
@@ -242,7 +287,7 @@ func readResponseBody(body io.ReadCloser) ([]byte, error) {
 		return nil, errors.New("VEW API response could not be read")
 	}
 	if len(content) > clientResponseBodyLimit {
-		return nil, errors.New("VEW API response exceeds size limit")
+		return nil, errResponseBodyTooLarge
 	}
 	return content, nil
 }
@@ -322,24 +367,4 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func newUUID() string {
-	var value [16]byte
-	if _, err := cryptorand.Read(value[:]); err != nil {
-		return ""
-	}
-	value[6] = value[6]&0x0f | 0x40
-	value[8] = value[8]&0x3f | 0x80
-	encoded := make([]byte, 36)
-	hex.Encode(encoded[0:8], value[0:4])
-	encoded[8] = '-'
-	hex.Encode(encoded[9:13], value[4:6])
-	encoded[13] = '-'
-	hex.Encode(encoded[14:18], value[6:8])
-	encoded[18] = '-'
-	hex.Encode(encoded[19:23], value[8:10])
-	encoded[23] = '-'
-	hex.Encode(encoded[24:36], value[10:16])
-	return string(encoded)
 }

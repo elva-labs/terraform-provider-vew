@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 )
 
 func TestClientCreateComponentMapsRequestAndResponse(t *testing.T) {
@@ -39,6 +40,37 @@ func TestClientCreateComponentMapsRequestAndResponse(t *testing.T) {
 	}
 	if gotInput.Name != "name" || gotInput.Description != "description" || gotInput.Platform != "Linux" || len(gotInput.SupportedArchitectures) != 1 || gotInput.SupportedArchitectures[0] != "arm64" || len(gotInput.SupportedOSVersions) != 1 || gotInput.SupportedOSVersions[0] != "Ubuntu 24" {
 		t.Fatalf("input = %#v", gotInput)
+	}
+}
+
+func TestClientCreateComponentUsesNonEmptyUUIDIdempotencyKey(t *testing.T) {
+	var keys []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		_, _ = io.WriteString(w, `{"id":"cmp-123"}`)
+	}))
+	defer server.Close()
+	c, err := New(Config{APIURL: server.URL, TokenURL: "https://token.example", ClientID: "id", ClientSecret: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.httpClient, c.tokens = server.Client(), staticTokenSource{}
+
+	for range 2 {
+		if _, err := c.CreateComponent(context.Background(), "project", CreateComponentInput{Name: "name"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(keys) != 2 {
+		t.Fatalf("keys = %v", keys)
+	}
+	for _, key := range keys {
+		if key == "" {
+			t.Fatal("idempotency key is empty")
+		}
+		if _, err := uuid.Parse(key); err != nil {
+			t.Fatalf("idempotency key %q is not a UUID: %v", key, err)
+		}
 	}
 }
 
@@ -174,6 +206,52 @@ func TestClientGetComponentDecodesEnvelope(t *testing.T) {
 	}
 }
 
+func TestClientEscapesProjectAndComponentIdentifiersAsSinglePathSegments(t *testing.T) {
+	var escapedPath string
+	c := testClient(t, "https://vew.example/api", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		escapedPath = r.URL.EscapedPath()
+		return jsonResponse(r, http.StatusOK, `{"component":{"id":"cmp"}}`), nil
+	})}, staticTokenSource{})
+	if _, err := c.GetComponent(context.Background(), "project/../one", "component/../two"); err != nil {
+		t.Fatal(err)
+	}
+	if escapedPath != "/api/projects/project%2F%2E%2E%2Fone/components/component%2F%2E%2E%2Ftwo" {
+		t.Fatalf("escaped path = %q", escapedPath)
+	}
+}
+
+func TestClientRejectsEmptyResourceIdentifiersBeforeSendingRequest(t *testing.T) {
+	calls := 0
+	c := testClient(t, "https://vew.example", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("request should not be sent")
+	})}, staticTokenSource{})
+	if _, err := c.CreateComponent(context.Background(), "", CreateComponentInput{Name: "name"}); err == nil {
+		t.Fatal("CreateComponent accepted empty project ID")
+	}
+	if _, err := c.GetComponent(context.Background(), "", "cmp"); err == nil {
+		t.Fatal("GetComponent accepted empty project ID")
+	}
+	if _, err := c.GetComponent(context.Background(), "project", ""); err == nil {
+		t.Fatal("GetComponent accepted empty component ID")
+	}
+	if err := c.UpdateComponent(context.Background(), "", "cmp", UpdateComponentInput{}); err == nil {
+		t.Fatal("UpdateComponent accepted empty project ID")
+	}
+	if err := c.UpdateComponent(context.Background(), "project", "", UpdateComponentInput{}); err == nil {
+		t.Fatal("UpdateComponent accepted empty component ID")
+	}
+	if err := c.ArchiveComponent(context.Background(), "", "cmp"); err == nil {
+		t.Fatal("ArchiveComponent accepted empty project ID")
+	}
+	if err := c.ArchiveComponent(context.Background(), "project", ""); err == nil {
+		t.Fatal("ArchiveComponent accepted empty component ID")
+	}
+	if calls != 0 {
+		t.Fatalf("sent %d requests for invalid identifiers", calls)
+	}
+}
+
 func TestClientUpdateComponentSendsDescriptionOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
@@ -285,15 +363,43 @@ func TestClientClosesEachRetryResponseBody(t *testing.T) {
 }
 
 func TestClientLimitsResponseBodyReads(t *testing.T) {
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		_, _ = io.WriteString(w, strings.Repeat("x", clientResponseBodyLimit+1))
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
-	c.maxAttempts = 1
+	c.sleep = func(context.Context, time.Duration) error { return nil }
 	_, err := c.GetComponent(context.Background(), "proj", "cmp")
 	if err == nil || !strings.Contains(err.Error(), "size limit") {
 		t.Fatalf("error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("oversized response made %d requests, want 1", calls)
+	}
+}
+
+func TestClientRecoversFromUnauthorizedAfterTransientRetryBoundary(t *testing.T) {
+	tokens := &tokenSourceStub{values: []string{"one", "two", "three", "four", "refreshed"}}
+	calls := 0
+	c := testClient(t, "https://vew.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls <= 3 {
+			return jsonResponse(r, http.StatusServiceUnavailable, ``), nil
+		}
+		if calls == 4 {
+			return jsonResponse(r, http.StatusUnauthorized, ``), nil
+		}
+		return jsonResponse(r, http.StatusOK, `{"component":{"id":"cmp"}}`), nil
+	})}, tokens)
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	component, err := c.GetComponent(context.Background(), "project", "cmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if component.ID != "cmp" || calls != 5 || strings.Join(tokens.forces, ",") != "false,false,false,false,true" {
+		t.Fatalf("component/calls/forces = %#v/%d/%v", component, calls, tokens.forces)
 	}
 }
 
