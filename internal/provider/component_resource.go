@@ -19,10 +19,7 @@ import (
 )
 
 // componentResource implements the VEW component resource schema and provider wiring.
-// The embedded interface supplies the lifecycle methods until their concrete
-// implementation is added with the resource lifecycle.
 type componentResource struct {
-	resource.Resource
 	client client.ComponentAPI
 }
 
@@ -105,6 +102,29 @@ func (r *componentResource) ImportState(ctx context.Context, request resource.Im
 	}
 	response.Diagnostics.Append(response.State.SetAttribute(ctx, path.Root("project_id"), projectID)...)
 	response.Diagnostics.Append(response.State.SetAttribute(ctx, path.Root("id"), componentID)...)
+}
+
+func (r *componentResource) Create(_ context.Context, _ resource.CreateRequest, response *resource.CreateResponse) {
+	lifecycleNotImplemented(&response.Diagnostics)
+}
+
+func (r *componentResource) Read(_ context.Context, _ resource.ReadRequest, response *resource.ReadResponse) {
+	lifecycleNotImplemented(&response.Diagnostics)
+}
+
+func (r *componentResource) Update(_ context.Context, _ resource.UpdateRequest, response *resource.UpdateResponse) {
+	lifecycleNotImplemented(&response.Diagnostics)
+}
+
+func (r *componentResource) Delete(_ context.Context, _ resource.DeleteRequest, response *resource.DeleteResponse) {
+	lifecycleNotImplemented(&response.Diagnostics)
+}
+
+func lifecycleNotImplemented(diagnostics *diag.Diagnostics) {
+	diagnostics.AddError(
+		"Component resource lifecycle not implemented",
+		"The vew_component lifecycle is not available in this provider build.",
+	)
 }
 
 func parseComponentImportID(value string) (projectID, componentID string, err error) {

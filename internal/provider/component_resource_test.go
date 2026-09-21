@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -82,5 +83,62 @@ func TestComponentResourceImport(t *testing.T) {
 		if _, _, err := parseComponentImportID(id); err == nil {
 			t.Errorf("parseComponentImportID(%q) succeeded", id)
 		}
+	}
+}
+
+func TestComponentResourceLifecycleMethodsReturnNotImplementedDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		call func(*componentResource) diag.Diagnostics
+	}{
+		{
+			name: "create",
+			call: func(r *componentResource) diag.Diagnostics {
+				var response resource.CreateResponse
+				r.Create(context.Background(), resource.CreateRequest{}, &response)
+				return response.Diagnostics
+			},
+		},
+		{
+			name: "read",
+			call: func(r *componentResource) diag.Diagnostics {
+				var response resource.ReadResponse
+				r.Read(context.Background(), resource.ReadRequest{}, &response)
+				return response.Diagnostics
+			},
+		},
+		{
+			name: "update",
+			call: func(r *componentResource) diag.Diagnostics {
+				var response resource.UpdateResponse
+				r.Update(context.Background(), resource.UpdateRequest{}, &response)
+				return response.Diagnostics
+			},
+		},
+		{
+			name: "delete",
+			call: func(r *componentResource) diag.Diagnostics {
+				var response resource.DeleteResponse
+				r.Delete(context.Background(), resource.DeleteRequest{}, &response)
+				return response.Diagnostics
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("lifecycle method panicked: %v", recovered)
+				}
+			}()
+			diagnostics := test.call(NewComponentResource())
+			if !diagnostics.HasError() {
+				t.Fatal("expected not-implemented error diagnostic")
+			}
+			if diagnostics[0].Summary() != "Component resource lifecycle not implemented" {
+				t.Fatalf("diagnostic summary = %q", diagnostics[0].Summary())
+			}
+		})
 	}
 }
