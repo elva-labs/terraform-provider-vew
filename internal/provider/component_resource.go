@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -15,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -104,27 +104,93 @@ func (r *componentResource) ImportState(ctx context.Context, request resource.Im
 	response.Diagnostics.Append(response.State.SetAttribute(ctx, path.Root("id"), componentID)...)
 }
 
-func (r *componentResource) Create(_ context.Context, _ resource.CreateRequest, response *resource.CreateResponse) {
-	lifecycleNotImplemented(&response.Diagnostics)
+func (r *componentResource) Create(ctx context.Context, request resource.CreateRequest, response *resource.CreateResponse) {
+	var plan componentModel
+	response.Diagnostics.Append(request.Plan.Get(ctx, &plan)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+
+	input, diagnostics := createInput(ctx, plan)
+	response.Diagnostics.Append(diagnostics...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+
+	componentID, err := r.client.CreateComponent(ctx, plan.ProjectID.ValueString(), input)
+	if err != nil {
+		response.Diagnostics.AddError("Unable to create VEW component", "The VEW component could not be created.")
+		return
+	}
+	component, err := r.client.GetComponent(ctx, plan.ProjectID.ValueString(), componentID)
+	if err != nil {
+		response.Diagnostics.AddError("Unable to read created VEW component", "The VEW component was created but its canonical state could not be read.")
+		return
+	}
+
+	response.Diagnostics.Append(setComponentState(ctx, &plan, component)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	response.Diagnostics.Append(response.State.Set(ctx, &plan)...)
 }
 
-func (r *componentResource) Read(_ context.Context, _ resource.ReadRequest, response *resource.ReadResponse) {
-	lifecycleNotImplemented(&response.Diagnostics)
+func (r *componentResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
+	var state componentModel
+	response.Diagnostics.Append(request.State.Get(ctx, &state)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	r.readComponent(ctx, &state, &response.State, &response.Diagnostics)
 }
 
-func (r *componentResource) Update(_ context.Context, _ resource.UpdateRequest, response *resource.UpdateResponse) {
-	lifecycleNotImplemented(&response.Diagnostics)
+func (r *componentResource) Update(ctx context.Context, request resource.UpdateRequest, response *resource.UpdateResponse) {
+	var plan, state componentModel
+	response.Diagnostics.Append(request.Plan.Get(ctx, &plan)...)
+	response.Diagnostics.Append(request.State.Get(ctx, &state)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+
+	err := r.client.UpdateComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString(), updateInput(plan))
+	if err != nil {
+		response.Diagnostics.AddError("Unable to update VEW component", "The VEW component description could not be updated.")
+		return
+	}
+	r.readComponent(ctx, &state, &response.State, &response.Diagnostics)
 }
 
-func (r *componentResource) Delete(_ context.Context, _ resource.DeleteRequest, response *resource.DeleteResponse) {
-	lifecycleNotImplemented(&response.Diagnostics)
+func (r *componentResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
+	var state componentModel
+	response.Diagnostics.Append(request.State.Get(ctx, &state)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	if err := r.client.ArchiveComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString()); err != nil {
+		response.Diagnostics.AddError("Unable to archive VEW component", "The VEW component could not be archived.")
+	}
 }
 
-func lifecycleNotImplemented(diagnostics *diag.Diagnostics) {
-	diagnostics.AddError(
-		"Component resource lifecycle not implemented",
-		"The vew_component lifecycle is not available in this provider build.",
-	)
+func (r *componentResource) readComponent(ctx context.Context, state *componentModel, terraformState *tfsdk.State, diagnostics *diag.Diagnostics) {
+	component, err := r.client.GetComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString())
+	if client.IsNotFound(err) {
+		terraformState.RemoveResource(ctx)
+		return
+	}
+	if err != nil {
+		diagnostics.AddError("Unable to read VEW component", "The VEW component state could not be read.")
+		return
+	}
+	if strings.EqualFold(component.Status, "ARCHIVED") {
+		terraformState.RemoveResource(ctx)
+		return
+	}
+
+	diagnostics.Append(setComponentState(ctx, state, component)...)
+	if diagnostics.HasError() {
+		return
+	}
+	diagnostics.Append(terraformState.Set(ctx, state)...)
 }
 
 func parseComponentImportID(value string) (projectID, componentID string, err error) {
@@ -155,18 +221,28 @@ func updateInput(model componentModel) client.UpdateComponentInput {
 	return client.UpdateComponentInput{Description: model.Description.ValueString()}
 }
 
-func setComponentState(model *componentModel, component client.Component) {
+func setComponentState(ctx context.Context, model *componentModel, component client.Component) diag.Diagnostics {
+	var diagnostics diag.Diagnostics
 	model.ID = types.StringValue(component.ID)
 	model.Name = types.StringValue(component.Name)
 	model.Description = types.StringValue(component.Description)
 	model.Platform = types.StringValue(component.Platform)
-	model.SupportedArchitectures = stringSet(component.SupportedArchitectures)
-	model.SupportedOSVersions = stringSet(component.SupportedOSVersions)
+	architectures, architectureDiagnostics := types.SetValueFrom(ctx, types.StringType, component.SupportedArchitectures)
+	diagnostics.Append(architectureDiagnostics...)
+	if !architectureDiagnostics.HasError() {
+		model.SupportedArchitectures = architectures
+	}
+	osVersions, osVersionDiagnostics := types.SetValueFrom(ctx, types.StringType, component.SupportedOSVersions)
+	diagnostics.Append(osVersionDiagnostics...)
+	if !osVersionDiagnostics.HasError() {
+		model.SupportedOSVersions = osVersions
+	}
 	model.Status = types.StringValue(component.Status)
 	model.CreatedAt = types.StringValue(component.CreatedAt)
 	model.CreatedBy = types.StringValue(component.CreatedBy)
 	model.UpdatedAt = types.StringValue(component.UpdatedAt)
 	model.UpdatedBy = types.StringValue(component.UpdatedBy)
+	return diagnostics
 }
 
 func setStrings(ctx context.Context, value types.Set, name string) ([]string, diag.Diagnostics) {
@@ -182,14 +258,4 @@ func setStrings(ctx context.Context, value types.Set, name string) ([]string, di
 	}
 	sort.Strings(values)
 	return values, diagnostics
-}
-
-func stringSet(values []string) types.Set {
-	values = append([]string(nil), values...)
-	sort.Strings(values)
-	elements := make([]attr.Value, len(values))
-	for index, value := range values {
-		elements[index] = types.StringValue(value)
-	}
-	return types.SetValueMust(types.StringType, elements)
 }

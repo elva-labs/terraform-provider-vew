@@ -2,14 +2,17 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/elva-labs/terraform-provider-vew/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	testresource "github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestComponentResourceSchema(t *testing.T) {
@@ -86,59 +89,138 @@ func TestComponentResourceImport(t *testing.T) {
 	}
 }
 
-func TestComponentResourceLifecycleMethodsReturnNotImplementedDiagnostic(t *testing.T) {
-	t.Parallel()
+func TestComponentResourceLifecycle(t *testing.T) {
+	fake := newFakeVEWServer(t)
+	config := testProviderConfig(fake) + componentResourceConfig("created by provider test")
 
+	testresource.Test(t, testresource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories(),
+		CheckDestroy: func(*terraform.State) error {
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if !fake.archived || fake.archiveCalls != 1 {
+				return fmt.Errorf("archive state/calls = %t/%d, want true/1", fake.archived, fake.archiveCalls)
+			}
+			return nil
+		},
+		Steps: []testresource.TestStep{
+			{
+				Config: config,
+				Check: testresource.ComposeTestCheckFunc(
+					testresource.TestCheckResourceAttr("vew_component.test", "id", "cmp-123"),
+					testresource.TestCheckResourceAttr("vew_component.test", "status", "ACTIVE"),
+					testresource.TestCheckResourceAttr("vew_component.test", "created_by", "terraform-test-user"),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if fake.createCalls != 1 || fake.getCalls != 1 || fake.idempotencyKey == "" {
+							return fmt.Errorf("create/get/key = %d/%d/%q", fake.createCalls, fake.getCalls, fake.idempotencyKey)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config:   config,
+				PlanOnly: true,
+				Check: func(*terraform.State) error {
+					fake.mu.Lock()
+					defer fake.mu.Unlock()
+					if fake.createCalls != 1 || fake.updateCalls != 0 {
+						return fmt.Errorf("create/update calls = %d/%d, want 1/0", fake.createCalls, fake.updateCalls)
+					}
+					return nil
+				},
+			},
+			{
+				Config: testProviderConfig(fake) + componentResourceConfig("updated by provider test"),
+				Check: testresource.ComposeTestCheckFunc(
+					testresource.TestCheckResourceAttr("vew_component.test", "description", "updated by provider test"),
+					testresource.TestCheckResourceAttr("vew_component.test", "updated_by", "terraform-test-updater"),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if fake.updateCalls != 1 || fake.update.Description != "updated by provider test" || fake.getCalls < 2 {
+							return fmt.Errorf("update/input/get = %d/%q/%d", fake.updateCalls, fake.update.Description, fake.getCalls)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				ResourceName:      "vew_component.test",
+				ImportState:       true,
+				ImportStateId:     "prog-73488/cmp-123",
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestComponentResourceReadRemoves(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		call func(*componentResource) diag.Diagnostics
+		name     string
+		notFound bool
+		status   string
 	}{
-		{
-			name: "create",
-			call: func(r *componentResource) diag.Diagnostics {
-				var response resource.CreateResponse
-				r.Create(context.Background(), resource.CreateRequest{}, &response)
-				return response.Diagnostics
-			},
-		},
-		{
-			name: "read",
-			call: func(r *componentResource) diag.Diagnostics {
-				var response resource.ReadResponse
-				r.Read(context.Background(), resource.ReadRequest{}, &response)
-				return response.Diagnostics
-			},
-		},
-		{
-			name: "update",
-			call: func(r *componentResource) diag.Diagnostics {
-				var response resource.UpdateResponse
-				r.Update(context.Background(), resource.UpdateRequest{}, &response)
-				return response.Diagnostics
-			},
-		},
-		{
-			name: "delete",
-			call: func(r *componentResource) diag.Diagnostics {
-				var response resource.DeleteResponse
-				r.Delete(context.Background(), resource.DeleteRequest{}, &response)
-				return response.Diagnostics
-			},
-		},
+		{name: "not found", notFound: true, status: "ACTIVE"},
+		{name: "archived", status: "ARCHIVED"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					t.Fatalf("lifecycle method panicked: %v", recovered)
-				}
-			}()
-			diagnostics := test.call(NewComponentResource())
-			if !diagnostics.HasError() {
-				t.Fatal("expected not-implemented error diagnostic")
-			}
-			if diagnostics[0].Summary() != "Component resource lifecycle not implemented" {
-				t.Fatalf("diagnostic summary = %q", diagnostics[0].Summary())
+			fake := newFakeVEWServer(t)
+			fake.component = testComponent(test.status)
+			fake.notFound = test.notFound
+			r := configuredComponentResource(t, fake)
+			state := componentTestState(t, r, testComponent("ACTIVE"))
+			response := resource.ReadResponse{State: state}
+			r.Read(context.Background(), resource.ReadRequest{State: state}, &response)
+			assertNoDiagnostics(t, response.Diagnostics)
+			if !response.State.Raw.IsNull() {
+				t.Fatalf("read state = %#v, want removed state", response.State.Raw)
 			}
 		})
+	}
+}
+
+func componentResourceConfig(description string) string {
+	return fmt.Sprintf(`
+resource "vew_component" "test" {
+  project_id              = "prog-73488"
+  name                    = "terraform-test-component"
+  description             = %q
+  platform                = "Linux"
+  supported_architectures = ["arm64", "x86_64"]
+  supported_os_versions   = ["Ubuntu 24"]
+}
+`, description)
+}
+
+func configuredComponentResource(t *testing.T, fake *fakeVEWServer) *componentResource {
+	t.Helper()
+	api, err := client.New(client.Config{APIURL: fake.server.URL, TokenURL: fake.server.URL + "/oauth/token", ClientID: testClientID, ClientSecret: testClientSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &componentResource{client: api}
+}
+
+func componentTestState(t *testing.T, r *componentResource, component client.Component) tfsdk.State {
+	t.Helper()
+	var schemaResponse resource.SchemaResponse
+	r.Schema(context.Background(), resource.SchemaRequest{}, &schemaResponse)
+	state := tfsdk.State{Schema: schemaResponse.Schema, Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), nil)}
+	model := componentModel{ProjectID: types.StringValue("prog-73488")}
+	assertNoDiagnostics(t, setComponentState(context.Background(), &model, component))
+	assertNoDiagnostics(t, state.Set(context.Background(), &model))
+	return state
+}
+
+func testComponent(status string) client.Component {
+	return client.Component{
+		ID: "cmp-123", Name: "terraform-test-component", Description: "created by provider test", Platform: "Linux",
+		SupportedArchitectures: []string{"arm64", "x86_64"}, SupportedOSVersions: []string{"Ubuntu 24"},
+		Status: status, CreatedAt: "2026-09-21T12:00:00Z", CreatedBy: "terraform-test-user",
+		UpdatedAt: "2026-09-21T12:00:00Z", UpdatedBy: "terraform-test-user",
 	}
 }
