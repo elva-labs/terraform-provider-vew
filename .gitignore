@@ -1,1 +1,6 @@
 .worktrees/
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.rc
+/terraform-provider-vew
