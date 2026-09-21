@@ -2,7 +2,12 @@ package provider
 
 import (
 	"context"
+	"net/url"
+	"os"
+	"strings"
 
+	"github.com/elva-labs/terraform-provider-vew/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -45,7 +50,70 @@ func (p *vewProvider) Schema(_ context.Context, _ provider.SchemaRequest, respon
 	}
 }
 
-func (p *vewProvider) Configure(context.Context, provider.ConfigureRequest, *provider.ConfigureResponse) {
+func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureRequest, response *provider.ConfigureResponse) {
+	var model providerModel
+	response.Diagnostics.Append(request.Config.Get(ctx, &model)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	config, diagnostics := resolveProviderConfig(model, os.LookupEnv)
+	response.Diagnostics.Append(diagnostics...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	api, err := client.New(config)
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW client", "The VEW client could not be configured.")
+		return
+	}
+	response.ResourceData = client.ComponentAPI(api)
+}
+
+func resolveProviderConfig(model providerModel, getenv func(string) (string, bool)) (client.Config, diag.Diagnostics) {
+	var diagnostics diag.Diagnostics
+	values := []struct {
+		name     string
+		env      string
+		value    types.String
+		setValue func(*client.Config, string)
+	}{
+		{"api_url", "VEW_API_URL", model.APIURL, func(config *client.Config, value string) { config.APIURL = value }},
+		{"token_url", "VEW_TOKEN_URL", model.TokenURL, func(config *client.Config, value string) { config.TokenURL = value }},
+		{"client_id", "VEW_CLIENT_ID", model.ClientID, func(config *client.Config, value string) { config.ClientID = value }},
+		{"client_secret", "VEW_CLIENT_SECRET", model.ClientSecret, func(config *client.Config, value string) { config.ClientSecret = value }},
+	}
+	var config client.Config
+	for _, field := range values {
+		if field.value.IsUnknown() {
+			diagnostics.AddError("Unknown provider configuration", field.name+" must be known; configure it explicitly or through "+field.env+".")
+			continue
+		}
+		value := ""
+		if field.value.IsNull() == false {
+			value = strings.TrimSpace(field.value.ValueString())
+		}
+		if value == "" {
+			value, _ = getenv(field.env)
+			value = strings.TrimSpace(value)
+		}
+		if value == "" {
+			diagnostics.AddError("Missing provider configuration", "Set the "+field.name+" attribute or "+field.env+" environment variable.")
+			continue
+		}
+		field.setValue(&config, value)
+	}
+	if config.APIURL != "" && !validHTTPURL(config.APIURL) {
+		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTP or HTTPS URL.")
+	}
+	if config.TokenURL != "" && !validHTTPURL(config.TokenURL) {
+		diagnostics.AddError("Invalid provider configuration", "token_url must be an absolute HTTP or HTTPS URL.")
+	}
+	return config, diagnostics
+}
+
+func validHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
