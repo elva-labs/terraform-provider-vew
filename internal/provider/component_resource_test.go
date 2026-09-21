@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -114,8 +117,8 @@ func TestComponentResourceLifecycle(t *testing.T) {
 					func(*terraform.State) error {
 						fake.mu.Lock()
 						defer fake.mu.Unlock()
-						if fake.createCalls != 1 || fake.getCalls != 1 || fake.idempotencyKey == "" {
-							return fmt.Errorf("create/get/key = %d/%d/%q", fake.createCalls, fake.getCalls, fake.idempotencyKey)
+						if fake.createCalls != 1 || fake.getCalls != 1 || fake.idempotencyKey == "" || fake.create.Name != "terraform-test-component" || fake.create.Description != "created by provider test" || fake.create.Platform != "Linux" || len(fake.create.SupportedArchitectures) != 2 || fake.create.SupportedArchitectures[0] != "arm64" || fake.create.SupportedArchitectures[1] != "x86_64" || len(fake.create.SupportedOSVersions) != 1 || fake.create.SupportedOSVersions[0] != "Ubuntu 24" {
+							return fmt.Errorf("create/get/key/input = %d/%d/%q/%#v", fake.createCalls, fake.getCalls, fake.idempotencyKey, fake.create)
 						}
 						return nil
 					},
@@ -183,6 +186,138 @@ func TestComponentResourceReadRemoves(t *testing.T) {
 	}
 }
 
+func TestComponentResourceCreateKeepsProvisionalStateWhenCanonicalReadFails(t *testing.T) {
+	fake := newFakeVEWServer(t)
+	fake.failGets = 4
+	fake.failGetDetail = "upstream included " + testClientSecret
+	r := configuredComponentResource(t, fake)
+	plan := componentTestPlan(t, r)
+	response := resource.CreateResponse{State: componentEmptyState(t, r)}
+
+	r.Create(context.Background(), resource.CreateRequest{Plan: plan}, &response)
+	assertNoDiagnostics(t, response.Diagnostics)
+	if len(response.Diagnostics) != 1 || response.Diagnostics[0].Severity().String() != "Warning" {
+		t.Fatalf("diagnostics = %s, want one warning", diagnosticsString(response.Diagnostics))
+	}
+	assertDiagnosticContains(t, response.Diagnostics, "cmp-123")
+	assertDiagnosticContains(t, response.Diagnostics, "503")
+	assertDiagnosticsOmit(t, response.Diagnostics, testClientSecret)
+
+	var provisional componentModel
+	assertNoDiagnostics(t, response.State.Get(context.Background(), &provisional))
+	if provisional.ID.ValueString() != "cmp-123" || provisional.ProjectID.ValueString() != "prog-73488" || provisional.Description.ValueString() != "created by provider test" {
+		t.Fatalf("provisional state = %#v", provisional)
+	}
+	for _, value := range []types.String{provisional.Status, provisional.CreatedAt, provisional.CreatedBy, provisional.UpdatedAt, provisional.UpdatedBy} {
+		if !value.IsNull() {
+			t.Fatalf("provisional computed value = %#v, want null", value)
+		}
+	}
+
+	readResponse := resource.ReadResponse{State: response.State}
+	r.Read(context.Background(), resource.ReadRequest{State: response.State}, &readResponse)
+	assertNoDiagnostics(t, readResponse.Diagnostics)
+	var canonical componentModel
+	assertNoDiagnostics(t, readResponse.State.Get(context.Background(), &canonical))
+	if canonical.Status.ValueString() != "ACTIVE" || canonical.CreatedBy.ValueString() != "terraform-test-user" {
+		t.Fatalf("canonical state = %#v", canonical)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.createCalls != 1 {
+		t.Fatalf("create calls = %d, want 1", fake.createCalls)
+	}
+}
+
+func TestComponentResourceLifecycleRefreshesProvisionalCreateWithoutDuplicate(t *testing.T) {
+	fake := newFakeVEWServer(t)
+	fake.failGets = 4
+	config := testProviderConfig(fake) + componentResourceConfig("created by provider test")
+
+	testresource.Test(t, testresource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories(),
+		CheckDestroy: func(*terraform.State) error {
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if !fake.archived {
+				return fmt.Errorf("component was not archived")
+			}
+			return nil
+		},
+		Steps: []testresource.TestStep{
+			{
+				Config: config,
+				Check: testresource.ComposeTestCheckFunc(
+					testresource.TestCheckResourceAttr("vew_component.test", "id", "cmp-123"),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if fake.createCalls != 1 {
+							return fmt.Errorf("create calls = %d, want 1", fake.createCalls)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: config,
+				Check: testresource.ComposeTestCheckFunc(
+					testresource.TestCheckResourceAttr("vew_component.test", "status", "ACTIVE"),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if fake.createCalls != 1 {
+							return fmt.Errorf("create calls = %d, want 1", fake.createCalls)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestFakeVEWServerRejectsExtraJSONFields(t *testing.T) {
+	fake := newFakeVEWServer(t)
+	for _, test := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{
+			name: "create",
+			path: "/projects/prog-73488/components",
+			body: `{"name":"terraform-test-component","description":"created by provider test","platform":"Linux","supportedArchitectures":["arm64","x86_64"],"supportedOsVersions":["Ubuntu 24"],"forbidden":true}`,
+		},
+		{
+			name: "update",
+			path: "/projects/prog-73488/components/cmp-123",
+			body: `{"componentDescription":"updated by provider test","forbidden":true}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, fake.server.URL+test.path, bytes.NewBufferString(test.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.name == "update" {
+				request.Method = http.MethodPut
+			}
+			request.Header.Set("Authorization", "Bearer "+testAccessToken)
+			request.Header.Set("Content-Type", "application/json")
+			response, err := fake.server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
 func componentResourceConfig(description string) string {
 	return fmt.Sprintf(`
 resource "vew_component" "test" {
@@ -214,6 +349,36 @@ func componentTestState(t *testing.T, r *componentResource, component client.Com
 	assertNoDiagnostics(t, setComponentState(context.Background(), &model, component))
 	assertNoDiagnostics(t, state.Set(context.Background(), &model))
 	return state
+}
+
+func componentTestPlan(t *testing.T, r *componentResource) tfsdk.Plan {
+	t.Helper()
+	var schemaResponse resource.SchemaResponse
+	r.Schema(context.Background(), resource.SchemaRequest{}, &schemaResponse)
+	plan := tfsdk.Plan{Schema: schemaResponse.Schema, Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), nil)}
+	model := componentModel{
+		ProjectID:              types.StringValue("prog-73488"),
+		Name:                   types.StringValue("terraform-test-component"),
+		Description:            types.StringValue("created by provider test"),
+		Platform:               types.StringValue("Linux"),
+		SupportedArchitectures: types.SetValueMust(types.StringType, []attr.Value{types.StringValue("arm64"), types.StringValue("x86_64")}),
+		SupportedOSVersions:    types.SetValueMust(types.StringType, []attr.Value{types.StringValue("Ubuntu 24")}),
+		ID:                     types.StringUnknown(),
+		Status:                 types.StringUnknown(),
+		CreatedAt:              types.StringUnknown(),
+		CreatedBy:              types.StringUnknown(),
+		UpdatedAt:              types.StringUnknown(),
+		UpdatedBy:              types.StringUnknown(),
+	}
+	assertNoDiagnostics(t, plan.Set(context.Background(), &model))
+	return plan
+}
+
+func componentEmptyState(t *testing.T, r *componentResource) tfsdk.State {
+	t.Helper()
+	var schemaResponse resource.SchemaResponse
+	r.Schema(context.Background(), resource.SchemaRequest{}, &schemaResponse)
+	return tfsdk.State{Schema: schemaResponse.Schema, Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), nil)}
 }
 
 func testComponent(status string) client.Component {

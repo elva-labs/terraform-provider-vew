@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -124,7 +125,15 @@ func (r *componentResource) Create(ctx context.Context, request resource.CreateR
 	}
 	component, err := r.client.GetComponent(ctx, plan.ProjectID.ValueString(), componentID)
 	if err != nil {
-		response.Diagnostics.AddError("Unable to read created VEW component", "The VEW component was created but its canonical state could not be read.")
+		setProvisionalComponentState(&plan, componentID)
+		response.Diagnostics.Append(response.State.Set(ctx, &plan)...)
+		if response.Diagnostics.HasError() {
+			return
+		}
+		response.Diagnostics.AddWarning(
+			"VEW component created with provisional state",
+			fmt.Sprintf("Component %q was created, but canonical state could not be read: %s. The provider will refresh state during the next read.", componentID, safeComponentAPIError(err)),
+		)
 		return
 	}
 
@@ -133,6 +142,23 @@ func (r *componentResource) Create(ctx context.Context, request resource.CreateR
 		return
 	}
 	response.Diagnostics.Append(response.State.Set(ctx, &plan)...)
+}
+
+func setProvisionalComponentState(model *componentModel, componentID string) {
+	model.ID = types.StringValue(componentID)
+	model.Status = types.StringNull()
+	model.CreatedAt = types.StringNull()
+	model.CreatedBy = types.StringNull()
+	model.UpdatedAt = types.StringNull()
+	model.UpdatedBy = types.StringNull()
+}
+
+func safeComponentAPIError(err error) string {
+	var apiError *client.APIError
+	if errors.As(err, &apiError) {
+		return fmt.Sprintf("VEW API returned status %d", apiError.Status)
+	}
+	return "VEW API request failed"
 }
 
 func (r *componentResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {

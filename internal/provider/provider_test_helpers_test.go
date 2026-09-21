@@ -3,6 +3,8 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -32,7 +34,10 @@ type fakeVEWServer struct {
 	updateCalls    int
 	archiveCalls   int
 	idempotencyKey string
+	create         client.CreateComponentInput
 	update         client.UpdateComponentInput
+	failGets       int
+	failGetDetail  string
 }
 
 func newFakeVEWServer(t *testing.T) *fakeVEWServer {
@@ -93,14 +98,20 @@ func (f *fakeVEWServer) handleToken(w http.ResponseWriter, request *http.Request
 }
 
 func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Request) {
+	payload, ok := exactJSONBody(request, "name", "description", "platform", "supportedArchitectures", "supportedOsVersions")
+	if !ok {
+		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
+		return
+	}
 	var input client.CreateComponentInput
-	if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+	if err := json.Unmarshal(payload, &input); err != nil {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
 		return
 	}
 	f.mu.Lock()
 	f.createCalls++
 	f.idempotencyKey = request.Header.Get("Idempotency-Key")
+	f.create = input
 	f.archived, f.notFound = false, false
 	f.component = client.Component{
 		ID: "cmp-123", Name: input.Name, Description: input.Description, Platform: input.Platform,
@@ -116,7 +127,16 @@ func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
 	f.mu.Lock()
 	f.getCalls++
 	component, missing := f.component, f.notFound
+	failing := f.failGets > 0
+	if failing {
+		f.failGets--
+	}
+	failureDetail := f.failGetDetail
 	f.mu.Unlock()
+	if failing {
+		f.writeProblem(w, http.StatusServiceUnavailable, failureDetail)
+		return
+	}
 	if missing {
 		f.writeProblem(w, http.StatusNotFound, "component not found")
 		return
@@ -125,8 +145,13 @@ func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
 }
 
 func (f *fakeVEWServer) handleUpdate(w http.ResponseWriter, request *http.Request) {
+	payload, ok := exactJSONBody(request, "componentDescription")
+	if !ok {
+		f.writeProblem(w, http.StatusBadRequest, "invalid component update request")
+		return
+	}
 	var input client.UpdateComponentInput
-	if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+	if err := json.Unmarshal(payload, &input); err != nil {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component update request")
 		return
 	}
@@ -138,6 +163,27 @@ func (f *fakeVEWServer) handleUpdate(w http.ResponseWriter, request *http.Reques
 	f.component.UpdatedBy = "terraform-test-updater"
 	f.mu.Unlock()
 	f.writeJSON(w, http.StatusOK, map[string]string{"result": "updated"})
+}
+
+func exactJSONBody(request *http.Request, expectedKeys ...string) ([]byte, bool) {
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return nil, false
+	}
+	payload, err := io.ReadAll(request.Body)
+	if err != nil {
+		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil || len(fields) != len(expectedKeys) {
+		return nil, false
+	}
+	for _, key := range expectedKeys {
+		if _, ok := fields[key]; !ok {
+			return nil, false
+		}
+	}
+	return payload, true
 }
 
 func (f *fakeVEWServer) handleArchive(w http.ResponseWriter) {
