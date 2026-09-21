@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -117,7 +117,9 @@ func validHTTPURL(raw string) bool {
 }
 
 func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
-	return nil
+	return []func() resource.Resource{
+		func() resource.Resource { return NewComponentResource() },
+	}
 }
 
 func (p *vewProvider) DataSources(context.Context) []func() datasource.DataSource {
