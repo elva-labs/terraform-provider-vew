@@ -93,21 +93,13 @@ func (c *Client) CreateComponent(ctx context.Context, projectID string, input Cr
 		return "", err
 	}
 	var envelope struct {
-		ID        string    `json:"id"`
-		Component Component `json:"component"`
-		Data      Component `json:"data"`
+		ID string `json:"componentId"`
 	}
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return "", errors.New("VEW component create response could not be decoded")
 	}
 	if envelope.ID != "" {
 		return envelope.ID, nil
-	}
-	if envelope.Component.ID != "" {
-		return envelope.Component.ID, nil
-	}
-	if envelope.Data.ID != "" {
-		return envelope.Data.ID, nil
 	}
 	return "", errors.New("VEW component create response missing component ID")
 }
@@ -124,16 +116,12 @@ func (c *Client) GetComponent(ctx context.Context, projectID, componentID string
 	}
 	var envelope struct {
 		Component Component `json:"component"`
-		Data      Component `json:"data"`
 	}
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return Component{}, errors.New("VEW component response could not be decoded")
 	}
 	if envelope.Component.ID != "" {
 		return envelope.Component, nil
-	}
-	if envelope.Data.ID != "" {
-		return envelope.Data, nil
 	}
 	return Component{}, errors.New("VEW component response missing component")
 }
@@ -324,7 +312,7 @@ func retryable(resp *response) bool {
 		return true
 	}
 	if resp.status == http.StatusConflict {
-		return resp.apiErr.Problem.Code == "IDEMPOTENCY_IN_PROGRESS"
+		return resp.apiErr.Problem.Code == "IDEMPOTENCY_REQUEST_IN_PROGRESS"
 	}
 	return resp.status == http.StatusTooManyRequests || resp.status >= http.StatusInternalServerError || resp.apiErr.Problem.Retryable
 }

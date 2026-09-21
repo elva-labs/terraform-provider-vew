@@ -8,11 +8,11 @@ import (
 
 // CreateComponentInput is the mutable configuration required to create a component.
 type CreateComponentInput struct {
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	Platform               string   `json:"platform"`
-	SupportedArchitectures []string `json:"supportedArchitectures"`
-	SupportedOSVersions    []string `json:"supportedOsVersions"`
+	Name                   string   `json:"componentName"`
+	Description            string   `json:"componentDescription"`
+	Platform               string   `json:"componentPlatform"`
+	SupportedArchitectures []string `json:"componentSupportedArchitectures"`
+	SupportedOSVersions    []string `json:"componentSupportedOsVersions"`
 }
 
 // UpdateComponentInput contains the one configuration property VEW permits changing.
@@ -22,17 +22,17 @@ type UpdateComponentInput struct {
 
 // Component is VEW's component representation.
 type Component struct {
-	ID                     string   `json:"id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	Platform               string   `json:"platform"`
-	SupportedArchitectures []string `json:"supportedArchitectures"`
-	SupportedOSVersions    []string `json:"supportedOsVersions"`
+	ID                     string   `json:"componentId"`
+	Name                   string   `json:"componentName"`
+	Description            string   `json:"componentDescription"`
+	Platform               string   `json:"componentPlatform"`
+	SupportedArchitectures []string `json:"componentSupportedArchitectures"`
+	SupportedOSVersions    []string `json:"componentSupportedOsVersions"`
 	Status                 string   `json:"status"`
-	CreatedAt              string   `json:"createdAt"`
+	CreatedAt              string   `json:"createDate"`
 	CreatedBy              string   `json:"createdBy"`
-	UpdatedAt              string   `json:"updatedAt"`
-	UpdatedBy              string   `json:"updatedBy"`
+	UpdatedAt              string   `json:"lastUpdateDate"`
+	UpdatedBy              string   `json:"lastUpdatedBy"`
 }
 
 // Problem is an RFC 9457-style error returned by VEW.

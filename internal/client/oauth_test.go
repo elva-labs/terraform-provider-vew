@@ -152,6 +152,31 @@ func TestOAuthTokenSourceStatusErrorExcludesServerControlledReason(t *testing.T)
 	}
 }
 
+func TestOAuthTokenSourceRejectsTrailingOrOversizedJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "trailing JSON", body: `{"access_token":"token","expires_in":120}{"unexpected":true}`},
+		{name: "trailing junk", body: `{"access_token":"token","expires_in":120} junk`},
+		{name: "oversized", body: `{"access_token":"token","expires_in":120}` + strings.Repeat(" ", responseBodyLimit)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			source, err := NewOAuthTokenSource(server.URL, "id", "secret", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Token(context.Background(), false); err == nil {
+				t.Fatal("Token accepted malformed or oversized JSON")
+			}
+		})
+	}
+}
+
 func TestOAuthTokenSourceConcurrentCallersShareRefresh(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

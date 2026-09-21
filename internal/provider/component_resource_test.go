@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/client"
@@ -65,6 +66,80 @@ func TestComponentResourceSchema(t *testing.T) {
 	}
 }
 
+func TestComponentResourceOperationDiagnosticsAreSanitizedAndContextual(t *testing.T) {
+	secret := "bearer-secret"
+	apiErr := &client.APIError{Status: http.StatusBadRequest, Problem: client.Problem{
+		Code: "INVALID_COMPONENT", RequestID: "request-123", Detail: "response body " + secret,
+	}}
+	for _, tc := range []struct {
+		name      string
+		operation string
+		run       func(*componentResource, tfsdk.Plan, tfsdk.State) string
+	}{
+		{
+			name: "create", operation: "create", run: func(r *componentResource, plan tfsdk.Plan, _ tfsdk.State) string {
+				response := resource.CreateResponse{State: componentEmptyState(t, r)}
+				r.Create(context.Background(), resource.CreateRequest{Plan: plan}, &response)
+				return diagnosticsString(response.Diagnostics)
+			},
+		},
+		{
+			name: "read", operation: "read", run: func(r *componentResource, _ tfsdk.Plan, state tfsdk.State) string {
+				response := resource.ReadResponse{State: state}
+				r.Read(context.Background(), resource.ReadRequest{State: state}, &response)
+				return diagnosticsString(response.Diagnostics)
+			},
+		},
+		{
+			name: "update", operation: "update", run: func(r *componentResource, plan tfsdk.Plan, state tfsdk.State) string {
+				response := resource.UpdateResponse{State: componentEmptyState(t, r)}
+				r.Update(context.Background(), resource.UpdateRequest{Plan: plan, State: state}, &response)
+				return diagnosticsString(response.Diagnostics)
+			},
+		},
+		{
+			name: "delete", operation: "archive", run: func(r *componentResource, _ tfsdk.Plan, state tfsdk.State) string {
+				response := resource.DeleteResponse{}
+				r.Delete(context.Background(), resource.DeleteRequest{State: state}, &response)
+				return diagnosticsString(response.Diagnostics)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &componentResource{client: failingComponentAPI{err: apiErr}}
+			plan := componentTestPlan(t, r)
+			state := componentTestState(t, r, testComponent("CREATED"))
+			got := tc.run(r, plan, state)
+			for _, want := range []string{tc.operation, "400", "INVALID_COMPONENT", "request-123"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("diagnostic %q missing %q", got, want)
+				}
+			}
+			if strings.Contains(got, secret) {
+				t.Fatalf("diagnostic leaked secret: %q", got)
+			}
+		})
+	}
+}
+
+type failingComponentAPI struct{ err error }
+
+func (api failingComponentAPI) CreateComponent(context.Context, string, client.CreateComponentInput) (string, error) {
+	return "", api.err
+}
+
+func (api failingComponentAPI) GetComponent(context.Context, string, string) (client.Component, error) {
+	return client.Component{}, api.err
+}
+
+func (api failingComponentAPI) UpdateComponent(context.Context, string, string, client.UpdateComponentInput) error {
+	return api.err
+}
+
+func (api failingComponentAPI) ArchiveComponent(context.Context, string, string) error {
+	return api.err
+}
+
 func TestComponentResourceImport(t *testing.T) {
 	t.Parallel()
 
@@ -112,7 +187,7 @@ func TestComponentResourceLifecycle(t *testing.T) {
 				Config: config,
 				Check: testresource.ComposeTestCheckFunc(
 					testresource.TestCheckResourceAttr("vew_component.test", "id", "cmp-123"),
-					testresource.TestCheckResourceAttr("vew_component.test", "status", "ACTIVE"),
+					testresource.TestCheckResourceAttr("vew_component.test", "status", "CREATED"),
 					testresource.TestCheckResourceAttr("vew_component.test", "created_by", "terraform-test-user"),
 					func(*terraform.State) error {
 						fake.mu.Lock()
@@ -167,7 +242,7 @@ func TestComponentResourceReadRemoves(t *testing.T) {
 		notFound bool
 		status   string
 	}{
-		{name: "not found", notFound: true, status: "ACTIVE"},
+		{name: "not found", notFound: true, status: "CREATED"},
 		{name: "archived", status: "ARCHIVED"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -175,7 +250,7 @@ func TestComponentResourceReadRemoves(t *testing.T) {
 			fake.component = testComponent(test.status)
 			fake.notFound = test.notFound
 			r := configuredComponentResource(t, fake)
-			state := componentTestState(t, r, testComponent("ACTIVE"))
+			state := componentTestState(t, r, testComponent("CREATED"))
 			response := resource.ReadResponse{State: state}
 			r.Read(context.Background(), resource.ReadRequest{State: state}, &response)
 			assertNoDiagnostics(t, response.Diagnostics)
@@ -219,7 +294,7 @@ func TestComponentResourceCreateKeepsProvisionalStateWhenCanonicalReadFails(t *t
 	assertNoDiagnostics(t, readResponse.Diagnostics)
 	var canonical componentModel
 	assertNoDiagnostics(t, readResponse.State.Get(context.Background(), &canonical))
-	if canonical.Status.ValueString() != "ACTIVE" || canonical.CreatedBy.ValueString() != "terraform-test-user" {
+	if canonical.Status.ValueString() != "CREATED" || canonical.CreatedBy.ValueString() != "terraform-test-user" {
 		t.Fatalf("canonical state = %#v", canonical)
 	}
 	fake.mu.Lock()
@@ -263,7 +338,7 @@ func TestComponentResourceLifecycleRefreshesProvisionalCreateWithoutDuplicate(t 
 			{
 				Config: config,
 				Check: testresource.ComposeTestCheckFunc(
-					testresource.TestCheckResourceAttr("vew_component.test", "status", "ACTIVE"),
+					testresource.TestCheckResourceAttr("vew_component.test", "status", "CREATED"),
 					func(*terraform.State) error {
 						fake.mu.Lock()
 						defer fake.mu.Unlock()
@@ -288,7 +363,7 @@ func TestFakeVEWServerRejectsExtraJSONFields(t *testing.T) {
 		{
 			name: "create",
 			path: "/projects/prog-73488/components",
-			body: `{"name":"terraform-test-component","description":"created by provider test","platform":"Linux","supportedArchitectures":["arm64","x86_64"],"supportedOsVersions":["Ubuntu 24"],"forbidden":true}`,
+			body: `{"componentName":"terraform-test-component","componentDescription":"created by provider test","componentPlatform":"Linux","componentSupportedArchitectures":["arm64","x86_64"],"componentSupportedOsVersions":["Ubuntu 24"],"forbidden":true}`,
 		},
 		{
 			name: "update",

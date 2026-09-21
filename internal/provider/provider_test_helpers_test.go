@@ -98,16 +98,27 @@ func (f *fakeVEWServer) handleToken(w http.ResponseWriter, request *http.Request
 }
 
 func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Request) {
-	payload, ok := exactJSONBody(request, "name", "description", "platform", "supportedArchitectures", "supportedOsVersions")
+	payload, ok := exactJSONBody(request, "componentName", "componentDescription", "componentPlatform", "componentSupportedArchitectures", "componentSupportedOsVersions")
 	if !ok {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
 		return
 	}
-	var input client.CreateComponentInput
-	if err := json.Unmarshal(payload, &input); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
 		return
 	}
+	var name, description, platform string
+	var architectures, osVersions []string
+	if json.Unmarshal(fields["componentName"], &name) != nil ||
+		json.Unmarshal(fields["componentDescription"], &description) != nil ||
+		json.Unmarshal(fields["componentPlatform"], &platform) != nil ||
+		json.Unmarshal(fields["componentSupportedArchitectures"], &architectures) != nil ||
+		json.Unmarshal(fields["componentSupportedOsVersions"], &osVersions) != nil {
+		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
+		return
+	}
+	input := client.CreateComponentInput{Name: name, Description: description, Platform: platform, SupportedArchitectures: architectures, SupportedOSVersions: osVersions}
 	f.mu.Lock()
 	f.createCalls++
 	f.idempotencyKey = request.Header.Get("Idempotency-Key")
@@ -116,11 +127,11 @@ func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Reques
 	f.component = client.Component{
 		ID: "cmp-123", Name: input.Name, Description: input.Description, Platform: input.Platform,
 		SupportedArchitectures: input.SupportedArchitectures, SupportedOSVersions: input.SupportedOSVersions,
-		Status: "ACTIVE", CreatedAt: "2026-09-21T12:00:00Z", CreatedBy: "terraform-test-user",
+		Status: "CREATED", CreatedAt: "2026-09-21T12:00:00Z", CreatedBy: "terraform-test-user",
 		UpdatedAt: "2026-09-21T12:00:00Z", UpdatedBy: "terraform-test-user",
 	}
 	f.mu.Unlock()
-	f.writeJSON(w, http.StatusCreated, map[string]string{"id": "cmp-123"})
+	f.writeJSON(w, http.StatusCreated, map[string]any{"componentId": "cmp-123"})
 }
 
 func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
@@ -141,7 +152,7 @@ func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
 		f.writeProblem(w, http.StatusNotFound, "component not found")
 		return
 	}
-	f.writeJSON(w, http.StatusOK, map[string]client.Component{"data": component})
+	f.writeJSON(w, http.StatusOK, map[string]any{"component": fakeComponentJSON(component)})
 }
 
 func (f *fakeVEWServer) handleUpdate(w http.ResponseWriter, request *http.Request) {
@@ -206,7 +217,23 @@ func (f *fakeVEWServer) writeJSON(w http.ResponseWriter, status int, value any) 
 }
 
 func (f *fakeVEWServer) writeProblem(w http.ResponseWriter, status int, detail string) {
-	f.writeJSON(w, status, client.Problem{Status: status, Title: http.StatusText(status), Detail: detail, Code: fmt.Sprintf("HTTP_%d", status)})
+	f.writeJSON(w, status, map[string]any{"status": status, "title": http.StatusText(status), "detail": detail, "code": fmt.Sprintf("HTTP_%d", status), "retryable": false})
+}
+
+func fakeComponentJSON(component client.Component) map[string]any {
+	return map[string]any{
+		"componentId":                     component.ID,
+		"componentName":                   component.Name,
+		"componentDescription":            component.Description,
+		"componentPlatform":               component.Platform,
+		"componentSupportedArchitectures": component.SupportedArchitectures,
+		"componentSupportedOsVersions":    component.SupportedOSVersions,
+		"status":                          component.Status,
+		"createDate":                      component.CreatedAt,
+		"createdBy":                       component.CreatedBy,
+		"lastUpdateDate":                  component.UpdatedAt,
+		"lastUpdatedBy":                   component.UpdatedBy,
+	}
 }
 
 func testProviderConfig(fake *fakeVEWServer) string {

@@ -120,7 +120,7 @@ func (r *componentResource) Create(ctx context.Context, request resource.CreateR
 
 	componentID, err := r.client.CreateComponent(ctx, plan.ProjectID.ValueString(), input)
 	if err != nil {
-		response.Diagnostics.AddError("Unable to create VEW component", "The VEW component could not be created.")
+		response.Diagnostics.AddError("Unable to create VEW component", componentAPIDiagnostic("create", err))
 		return
 	}
 	component, err := r.client.GetComponent(ctx, plan.ProjectID.ValueString(), componentID)
@@ -132,7 +132,7 @@ func (r *componentResource) Create(ctx context.Context, request resource.CreateR
 		}
 		response.Diagnostics.AddWarning(
 			"VEW component created with provisional state",
-			fmt.Sprintf("Component %q was created, but canonical state could not be read: %s. The provider will refresh state during the next read.", componentID, safeComponentAPIError(err)),
+			fmt.Sprintf("Component %q was created, but canonical state could not be read: %s. The provider will refresh state during the next read.", componentID, componentAPIDiagnostic("read", err)),
 		)
 		return
 	}
@@ -153,12 +153,20 @@ func setProvisionalComponentState(model *componentModel, componentID string) {
 	model.UpdatedBy = types.StringNull()
 }
 
-func safeComponentAPIError(err error) string {
+func componentAPIDiagnostic(operation string, err error) string {
+	message := fmt.Sprintf("VEW API %s failed", operation)
 	var apiError *client.APIError
-	if errors.As(err, &apiError) {
-		return fmt.Sprintf("VEW API returned status %d", apiError.Status)
+	if !errors.As(err, &apiError) {
+		return message
 	}
-	return "VEW API request failed"
+	parts := []string{fmt.Sprintf("HTTP status %d", apiError.Status)}
+	if code := strings.TrimSpace(apiError.Problem.Code); code != "" {
+		parts = append(parts, "problem code "+code)
+	}
+	if requestID := strings.TrimSpace(apiError.Problem.RequestID); requestID != "" {
+		parts = append(parts, "request ID "+requestID)
+	}
+	return message + " (" + strings.Join(parts, ", ") + ")"
 }
 
 func (r *componentResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
@@ -180,7 +188,7 @@ func (r *componentResource) Update(ctx context.Context, request resource.UpdateR
 
 	err := r.client.UpdateComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString(), updateInput(plan))
 	if err != nil {
-		response.Diagnostics.AddError("Unable to update VEW component", "The VEW component description could not be updated.")
+		response.Diagnostics.AddError("Unable to update VEW component", componentAPIDiagnostic("update", err))
 		return
 	}
 	r.readComponent(ctx, &state, &response.State, &response.Diagnostics)
@@ -193,7 +201,7 @@ func (r *componentResource) Delete(ctx context.Context, request resource.DeleteR
 		return
 	}
 	if err := r.client.ArchiveComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString()); err != nil {
-		response.Diagnostics.AddError("Unable to archive VEW component", "The VEW component could not be archived.")
+		response.Diagnostics.AddError("Unable to archive VEW component", componentAPIDiagnostic("archive", err))
 	}
 }
 
@@ -204,7 +212,7 @@ func (r *componentResource) readComponent(ctx context.Context, state *componentM
 		return
 	}
 	if err != nil {
-		diagnostics.AddError("Unable to read VEW component", "The VEW component state could not be read.")
+		diagnostics.AddError("Unable to read VEW component", componentAPIDiagnostic("read", err))
 		return
 	}
 	if strings.EqualFold(component.Status, "ARCHIVED") {

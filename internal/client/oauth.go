@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -130,9 +131,21 @@ func (s *OAuthTokenSource) refresh(ctx context.Context) (string, time.Time, erro
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return "", time.Time{}, fmt.Errorf("oauth token endpoint returned status %d", resp.StatusCode)
 	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, responseBodyLimit+1))
+	if err != nil {
+		return "", time.Time{}, errors.New("oauth token response could not be read")
+	}
+	if len(body) > responseBodyLimit {
+		return "", time.Time{}, errors.New("oauth token response exceeds size limit")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	var token oauthTokenResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, responseBodyLimit)).Decode(&token); err != nil {
+	if err := decoder.Decode(&token); err != nil {
 		return "", time.Time{}, fmt.Errorf("oauth token response decoding failed: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return "", time.Time{}, errors.New("oauth token response contains trailing data")
 	}
 	if token.AccessToken == "" {
 		return "", time.Time{}, errors.New("oauth token response missing access_token")

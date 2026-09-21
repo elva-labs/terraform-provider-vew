@@ -18,14 +18,14 @@ import (
 
 func TestClientCreateComponentMapsRequestAndResponse(t *testing.T) {
 	var gotPath, gotKey string
-	var gotInput CreateComponentInput
+	var gotInput map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotKey = r.URL.Path, r.Header.Get("Idempotency-Key")
 		if err := json.NewDecoder(r.Body).Decode(&gotInput); err != nil {
 			t.Fatal(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"cmp-123"}`)
+		_, _ = io.WriteString(w, `{"componentId":"cmp-123"}`)
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
@@ -38,7 +38,7 @@ func TestClientCreateComponentMapsRequestAndResponse(t *testing.T) {
 	if id != "cmp-123" || gotPath != "/projects/proj-1/components" || gotKey != "key-1" {
 		t.Fatalf("id/path/key = %q/%q/%q", id, gotPath, gotKey)
 	}
-	if gotInput.Name != "name" || gotInput.Description != "description" || gotInput.Platform != "Linux" || len(gotInput.SupportedArchitectures) != 1 || gotInput.SupportedArchitectures[0] != "arm64" || len(gotInput.SupportedOSVersions) != 1 || gotInput.SupportedOSVersions[0] != "Ubuntu 24" {
+	if len(gotInput) != 5 || gotInput["componentName"] != "name" || gotInput["componentDescription"] != "description" || gotInput["componentPlatform"] != "Linux" || !stringSlicesEqual(gotInput["componentSupportedArchitectures"], []string{"arm64"}) || !stringSlicesEqual(gotInput["componentSupportedOsVersions"], []string{"Ubuntu 24"}) {
 		t.Fatalf("input = %#v", gotInput)
 	}
 }
@@ -47,7 +47,7 @@ func TestClientCreateComponentUsesNonEmptyUUIDIdempotencyKey(t *testing.T) {
 	var keys []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		keys = append(keys, r.Header.Get("Idempotency-Key"))
-		_, _ = io.WriteString(w, `{"id":"cmp-123"}`)
+		_, _ = io.WriteString(w, `{"componentId":"cmp-123"}`)
 	}))
 	defer server.Close()
 	c, err := New(Config{APIURL: server.URL, TokenURL: "https://token.example", ClientID: "id", ClientSecret: "secret"})
@@ -86,7 +86,7 @@ func TestClientCreateComponentReusesKeyAndBodyAfterLostResponse(t *testing.T) {
 		if len(bodies) == 1 {
 			return nil, io.ErrUnexpectedEOF
 		}
-		return jsonResponse(r, http.StatusCreated, `{"id":"cmp-123"}`), nil
+		return jsonResponse(r, http.StatusCreated, `{"componentId":"cmp-123"}`), nil
 	})}, staticTokenSource{})
 	c.idempotencyKey = func() string { return "stable-key" }
 	c.sleep = func(context.Context, time.Duration) error { return nil }
@@ -107,10 +107,10 @@ func TestClientCreateComponentHonorsRetryAfterForInProgressOperation(t *testing.
 		if calls == 1 {
 			w.Header().Set("Retry-After", "3")
 			w.WriteHeader(http.StatusConflict)
-			_, _ = io.WriteString(w, `{"status":409,"code":"IDEMPOTENCY_IN_PROGRESS","retryable":true}`)
+			_, _ = io.WriteString(w, `{"status":409,"code":"IDEMPOTENCY_REQUEST_IN_PROGRESS","retryable":true}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"id":"cmp-123"}`)
+		_, _ = io.WriteString(w, `{"componentId":"cmp-123"}`)
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
@@ -120,6 +120,28 @@ func TestClientCreateComponentHonorsRetryAfterForInProgressOperation(t *testing.
 	}
 	if calls != 2 || len(delays) != 1 || delays[0] != 3*time.Second {
 		t.Fatalf("calls/delays = %d/%v", calls, delays)
+	}
+}
+
+func TestClientCreateComponentDoesNotRetryReusedIdempotencyKey(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "3")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"status":409,"code":"IDEMPOTENCY_KEY_REUSED","retryable":true}`)
+	}))
+	defer server.Close()
+	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
+	c.sleep = func(context.Context, time.Duration) error {
+		t.Fatal("retried reused idempotency key")
+		return nil
+	}
+	if _, err := c.CreateComponent(context.Background(), "proj", CreateComponentInput{Name: "n"}); err == nil {
+		t.Fatal("CreateComponent accepted reused idempotency key")
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
 	}
 }
 
@@ -133,7 +155,7 @@ func TestClientHonorsHTTPDateRetryAfter(t *testing.T) {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
-		_, _ = io.WriteString(w, `{"component":{"id":"cmp"}}`)
+		_, _ = io.WriteString(w, `{"component":{"componentId":"cmp"}}`)
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
@@ -158,7 +180,7 @@ func TestClientRefreshesTokenOnceAfterUnauthorized(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer new" {
 			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
 		}
-		_, _ = io.WriteString(w, `{"component":{"id":"cmp-123"}}`)
+		_, _ = io.WriteString(w, `{"component":{"componentId":"cmp-123"}}`)
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), tokens)
@@ -193,7 +215,7 @@ func TestClientGetComponentDecodesEnvelope(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/projects/proj/components/cmp" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		_, _ = io.WriteString(w, `{"component":{"id":"cmp","name":"name","description":"description","platform":"Linux","supportedArchitectures":["arm64"],"supportedOsVersions":["Ubuntu 24"],"status":"READY","createdAt":"2026-09-21T00:00:00Z","createdBy":"creator","updatedAt":"2026-09-22T00:00:00Z","updatedBy":"updater"}}`)
+		_, _ = io.WriteString(w, `{"component":{"componentId":"cmp","componentName":"name","componentDescription":"description","componentPlatform":"Linux","componentSupportedArchitectures":["arm64"],"componentSupportedOsVersions":["Ubuntu 24"],"status":"CREATED","createDate":"2026-09-21T00:00:00Z","createdBy":"creator","lastUpdateDate":"2026-09-22T00:00:00Z","lastUpdatedBy":"updater"}}`)
 	}))
 	defer server.Close()
 	c := testClient(t, server.URL, server.Client(), staticTokenSource{})
@@ -201,7 +223,7 @@ func TestClientGetComponentDecodesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "cmp" || got.Status != "READY" || got.CreatedBy != "creator" || got.UpdatedBy != "updater" || len(got.SupportedArchitectures) != 1 || got.SupportedArchitectures[0] != "arm64" {
+	if got.ID != "cmp" || got.Status != "CREATED" || got.Name != "name" || got.Description != "description" || got.Platform != "Linux" || got.CreatedAt != "2026-09-21T00:00:00Z" || got.CreatedBy != "creator" || got.UpdatedAt != "2026-09-22T00:00:00Z" || got.UpdatedBy != "updater" || len(got.SupportedArchitectures) != 1 || got.SupportedArchitectures[0] != "arm64" || len(got.SupportedOSVersions) != 1 || got.SupportedOSVersions[0] != "Ubuntu 24" {
 		t.Fatalf("component = %#v", got)
 	}
 }
@@ -210,7 +232,7 @@ func TestClientEscapesProjectAndComponentIdentifiersAsSinglePathSegments(t *test
 	var escapedPath string
 	c := testClient(t, "https://vew.example/api", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		escapedPath = r.URL.EscapedPath()
-		return jsonResponse(r, http.StatusOK, `{"component":{"id":"cmp"}}`), nil
+		return jsonResponse(r, http.StatusOK, `{"component":{"componentId":"cmp"}}`), nil
 	})}, staticTokenSource{})
 	if _, err := c.GetComponent(context.Background(), "project/../one", "component/../two"); err != nil {
 		t.Fatal(err)
@@ -346,7 +368,7 @@ func TestClientClosesEachRetryResponseBody(t *testing.T) {
 	calls := 0
 	c := testClient(t, "https://vew.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
-		body := &trackingReadCloser{Reader: strings.NewReader(`{"component":{"id":"cmp"}}`)}
+		body := &trackingReadCloser{Reader: strings.NewReader(`{"component":{"componentId":"cmp"}}`)}
 		bodies = append(bodies, body)
 		if calls == 1 {
 			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: body, Request: r}, nil
@@ -391,7 +413,7 @@ func TestClientRecoversFromUnauthorizedAfterTransientRetryBoundary(t *testing.T)
 		if calls == 4 {
 			return jsonResponse(r, http.StatusUnauthorized, ``), nil
 		}
-		return jsonResponse(r, http.StatusOK, `{"component":{"id":"cmp"}}`), nil
+		return jsonResponse(r, http.StatusOK, `{"component":{"componentId":"cmp"}}`), nil
 	})}, tokens)
 	c.sleep = func(context.Context, time.Duration) error { return nil }
 	component, err := c.GetComponent(context.Background(), "project", "cmp")
@@ -441,6 +463,19 @@ func (s staticTokenSource) Token(context.Context, bool) (string, error) {
 		return s.token, nil
 	}
 	return "token", nil
+}
+
+func stringSlicesEqual(value any, want []string) bool {
+	got, ok := value.([]any)
+	if !ok || len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func jsonResponse(r *http.Request, status int, body string) *http.Response {

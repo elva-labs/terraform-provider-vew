@@ -34,7 +34,7 @@ func TestAccComponentResource(t *testing.T) {
 					testresource.TestCheckResourceAttrSet(testAccComponentResourceName, "id"),
 					testresource.TestCheckResourceAttr(testAccComponentResourceName, "name", name),
 					testresource.TestCheckResourceAttr(testAccComponentResourceName, "description", initialDescription),
-					testresource.TestCheckResourceAttr(testAccComponentResourceName, "status", "ACTIVE"),
+					testresource.TestCheckResourceAttr(testAccComponentResourceName, "status", "CREATED"),
 				),
 			},
 			{

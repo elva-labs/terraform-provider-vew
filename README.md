@@ -14,7 +14,7 @@ attribute is omitted or empty:
 
 | Provider attribute | Environment variable | Description |
 | --- | --- | --- |
-| `api_url` | `VEW_API_URL` | Absolute VEW API HTTP(S) URL |
+| `api_url` | `VEW_API_URL` | Absolute VEW API HTTP(S) URL, including `/clients/packaging/v1` (the provider appends `/projects/...`) |
 | `token_url` | `VEW_TOKEN_URL` | Absolute OAuth token HTTP(S) URL |
 | `client_id` | `VEW_CLIENT_ID` | OAuth client ID |
 | `client_secret` | `VEW_CLIENT_SECRET` | OAuth client secret (sensitive) |
