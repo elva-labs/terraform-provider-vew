@@ -25,12 +25,16 @@ import (
 // replacing only the slow polling clock. Shared waiter timing has its own tests.
 type immediateVersionWaiter struct {
 	timeout, delay time.Duration
+	deadlines      []time.Time
 	limit          int
 	afterRead      func()
 }
 
 func (w *immediateVersionWaiter) Until(ctx context.Context, timeout, delay time.Duration, read vew.StatusReader, evaluate vew.StatusEvaluator) error {
 	w.timeout, w.delay = timeout, delay
+	if deadline, ok := ctx.Deadline(); ok {
+		w.deadlines = append(w.deadlines, deadline)
+	}
 	for n := 0; n < 20; n++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -446,6 +450,52 @@ func TestComponentVersionUpdateWaitsForPendingRemoteOperationBeforePut(t *testin
 		t.Fatal(response.Diagnostics)
 	}
 	assertVersionMethods(t, fake, "GET", "GET", "GET", "GET", "PUT", "GET", "GET", "GET", "GET")
+}
+
+func TestComponentVersionMutationReusesOperationDeadlineAcrossSettlementAndMutationWaits(t *testing.T) {
+	tests := []struct {
+		name     string
+		statuses []string
+		run      func(*testing.T, *componentVersionResource, componentVersionModel, componentVersionModel)
+	}{
+		{
+			name:     "update",
+			statuses: []string{"UPDATING", "CREATED", "VALIDATED", "UPDATING", "VALIDATED"},
+			run: func(t *testing.T, r *componentVersionResource, state, plan componentVersionModel) {
+				t.Helper()
+				response := updateVersion(t, r, state, plan)
+				if response.Diagnostics.HasError() {
+					t.Fatalf("update diagnostics = %v", response.Diagnostics)
+				}
+			},
+		},
+		{
+			name:     "delete",
+			statuses: []string{"UPDATING", "CREATED", "VALIDATED", "UPDATING", "RETIRED"},
+			run: func(t *testing.T, r *componentVersionResource, state, _ componentVersionModel) {
+				t.Helper()
+				response := deleteVersion(t, r, state)
+				if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+					t.Fatalf("delete diagnostics/state = %v/%v", response.Diagnostics, response.State.Raw)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r, _, waiter := versionHarness(t, test.statuses...)
+			state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+			state.Timeouts, plan.Timeouts = timeoutsValue(t, "", "3m", "4m"), timeoutsValue(t, "", "3m", "4m")
+			plan.Description = types.StringValue("changed")
+			test.run(t, r, state, plan)
+			if len(waiter.deadlines) != 2 {
+				t.Fatalf("wait deadlines = %v, want pre-settlement and mutation waits", waiter.deadlines)
+			}
+			if !waiter.deadlines[0].Equal(waiter.deadlines[1]) {
+				t.Fatalf("wait deadlines = %v, want one shared operation deadline", waiter.deadlines)
+			}
+		})
+	}
 }
 
 func TestComponentVersionUpdatePreservesStateOnFailedStatus(t *testing.T) {
