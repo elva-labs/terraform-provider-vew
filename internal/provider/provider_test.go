@@ -10,6 +10,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -170,8 +171,28 @@ func TestProviderConfigureSetsProviderData(t *testing.T) {
 	if !ok || data.Components == nil {
 		t.Fatalf("expected ResourceData to contain providerdata.Data with components API, got %T", response.ResourceData)
 	}
+	if data.ComponentVersions == nil || data.Waiter == nil {
+		t.Fatalf("expected ResourceData to include component-version API and waiter, got %#v", data)
+	}
 	if _, ok := response.DataSourceData.(providerdata.Data); !ok {
 		t.Fatalf("expected DataSourceData to contain providerdata.Data, got %T", response.DataSourceData)
+	}
+}
+
+func TestProviderResourcesIncludesComponentVersion(t *testing.T) {
+	t.Parallel()
+
+	resources := New("test")().Resources(context.Background())
+	if len(resources) != 2 {
+		t.Fatalf("resource constructors = %d, want 2", len(resources))
+	}
+	want := []string{"vew_component", "vew_component_version"}
+	for index, constructor := range resources {
+		var response resource.MetadataResponse
+		constructor().Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "vew"}, &response)
+		if response.TypeName != want[index] {
+			t.Fatalf("resource[%d] type = %q, want %q", index, response.TypeName, want[index])
+		}
 	}
 }
 

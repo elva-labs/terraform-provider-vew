@@ -70,7 +70,11 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		return
 	}
 	api := components.NewClient(transport)
-	data := providerdata.Data{Components: api}
+	data := providerdata.Data{
+		Components:        api,
+		ComponentVersions: api,
+		Waiter:            vew.NewWaiter(),
+	}
 	response.ResourceData = data
 	response.DataSourceData = data
 }
@@ -125,6 +129,7 @@ func validHTTPURL(raw string) bool {
 func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		func() resource.Resource { return providercomponents.NewComponentResource() },
+		providercomponents.NewComponentVersionResource,
 	}
 }
 
