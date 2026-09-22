@@ -8,11 +8,21 @@ resource "vew_component" "example" {
 }
 
 resource "vew_component_version" "example" {
-  project_id        = vew_component.example.project_id
-  component_id      = vew_component.example.id
-  description       = "Managed by Terraform"
-  release_type      = "PATCH"
-  definition_json   = jsonencode({ phases = [] })
+  project_id   = vew_component.example.project_id
+  component_id = vew_component.example.id
+  description  = "Managed by Terraform"
+  release_type = "PATCH"
+  definition_json = jsonencode({
+    schemaVersion = "1.0"
+    phases = [{
+      name = "build"
+      steps = [{
+        name   = "HarmlessCheck"
+        action = "ExecuteBash"
+        inputs = { commands = ["true"] }
+      }]
+    }]
+  })
   dependencies      = []
   software_vendor   = "Example vendor"
   software_version  = "1.0.0"
@@ -28,6 +38,6 @@ resource "vew_component_version" "example" {
   #   version_name   = "1.2.3"
   #   type           = "HELPER"
   #   order          = 1
-  #   position       = "before"
+  #   position       = "PREPEND"
   # }]
 }

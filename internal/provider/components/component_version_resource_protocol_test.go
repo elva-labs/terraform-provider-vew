@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,15 @@ func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfig
 		}
 		return nil
 	}
+	formattedConfig := strings.Replace(config, fmt.Sprintf("%q", definition), fmt.Sprintf("%q", `{"phases":[{"steps":[{}]}]}`), 1)
+	reorderedConfig := strings.Replace(formattedConfig, `    { component_id = "b", component_name = "B", version_id = "vb", version_name = "2", order = 2 },
+    { component_id = "a", component_name = "A", version_id = "va", version_name = "1", order = 1 }`, `    { component_id = "a", component_name = "A", version_id = "va", version_name = "1", order = 1 },
+    { component_id = "b", component_name = "B", version_id = "vb", version_name = "2", order = 2 }`, 1)
+	timeoutConfig := strings.Replace(reorderedConfig, `release_type     = "PATCH"`, `release_type     = "PATCH"
+  timeouts { update = "3m" }`, 1)
+	if formattedConfig == config || reorderedConfig == formattedConfig || timeoutConfig == reorderedConfig {
+		t.Fatal("semantic edit test did not change configuration")
+	}
 	testresource.Test(t, testresource.TestCase{
 		IsUnitTest:               true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"vew": providerserver.NewProtocol6WithError(&fastVersionProvider{Provider: rootprovider.New("test")()})},
@@ -200,6 +210,53 @@ func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfig
 				testresource.TestCheckResourceAttr("vew_component_version.test", "dependencies.0.component_id", "b"),
 			)},
 			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: false, Check: getOnly},
+			{Config: formattedConfig, Check: getOnly},
+			{Config: formattedConfig, PlanOnly: true, ExpectNonEmptyPlan: false, Check: getOnly},
+			{Config: reorderedConfig, Check: testresource.ComposeTestCheckFunc(getOnly, testresource.TestCheckResourceAttr("vew_component_version.test", "dependencies.0.component_id", "a"))},
+			{Config: reorderedConfig, PlanOnly: true, ExpectNonEmptyPlan: false, Check: getOnly},
+			{Config: timeoutConfig, Check: getOnly},
+			{Config: timeoutConfig, PlanOnly: true, ExpectNonEmptyPlan: false, Check: getOnly},
+		},
+	})
+}
+
+func TestComponentVersionFailedUpdateUnchangedReapplyRetriesProtocol(t *testing.T) {
+	fake := testhelpers.NewVEWServer(t)
+	remote := vewcomponents.ComponentVersion{ID: "version", ComponentID: "cmp-123", Description: "created by provider test", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, Status: "VALIDATED"}
+	fake.QueueVersionActionReads("POST", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	remote.Description, remote.Status = "attempted update", "FAILED"
+	fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	retired := remote
+	retired.Status = "RETIRED"
+	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
+	config := fake.ProviderConfig() + componentVersionResourceConfig()
+	updated := strings.Replace(config, "created by provider test", "attempted update", 1)
+	testresource.Test(t, testresource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"vew": providerserver.NewProtocol6WithError(&fastVersionProvider{Provider: rootprovider.New("test")()})},
+		Steps: []testresource.TestStep{
+			{Config: config},
+			{Config: updated, ExpectError: regexp.MustCompile(`reached FAILED`)},
+			{Config: updated, PreConfig: func() {
+				remote.Status = "VALIDATED"
+				fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+			}, Check: testresource.ComposeTestCheckFunc(
+				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "VALIDATED"),
+				testresource.TestCheckResourceAttr("vew_component_version.test", "description", "attempted update"),
+				func(*terraform.State) error {
+					puts := 0
+					for _, request := range fake.VersionRequests() {
+						if request.Method == "PUT" {
+							puts++
+						}
+					}
+					if puts != 2 {
+						return fmt.Errorf("unchanged reapply issued %d PUTs, want failed attempt plus retry", puts)
+					}
+					return nil
+				},
+			)},
+			{Config: updated, PlanOnly: true, ExpectNonEmptyPlan: false},
 		},
 	})
 }

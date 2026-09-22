@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -178,6 +179,11 @@ func (r *componentVersionResource) ValidateConfig(ctx context.Context, request r
 	if !config.Dependencies.IsUnknown() && !config.Dependencies.IsNull() {
 		response.Diagnostics.Append(validateDependencies(ctx, config.Dependencies)...)
 	}
+	for name, value := range map[string]types.String{"notes": config.Notes, "license_dashboard": config.LicenseDashboard} {
+		if !value.IsNull() && !value.IsUnknown() && value.ValueString() == "" {
+			response.Diagnostics.AddAttributeError(path.Root(name), "Empty optional component version value", name+" must be non-empty when configured; omit it or use null to leave it unset.")
+		}
+	}
 	response.Diagnostics.Append(validateTimeouts(ctx, config.Timeouts)...)
 }
 
@@ -316,6 +322,9 @@ func (r *componentVersionResource) Create(ctx context.Context, request resource.
 	if response.Diagnostics.HasError() {
 		return
 	}
+	timeout := operationTimeout(ctx, model.Timeouts, "create")
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	input, diagnostics := versionMutableInput(ctx, model)
 	response.Diagnostics.Append(diagnostics...)
 	if response.Diagnostics.HasError() {
@@ -327,7 +336,7 @@ func (r *componentVersionResource) Create(ctx context.Context, request resource.
 		LicenseDashboard: input.LicenseDashboard, Notes: input.Notes,
 	})
 	if err != nil {
-		addVersionError(&response.Diagnostics, "create", err)
+		addVersionError(&response.Diagnostics, "create", err, model.ID.ValueString())
 		return
 	}
 	model.ID = types.StringValue(action.ID)
@@ -339,10 +348,10 @@ func (r *componentVersionResource) Create(ctx context.Context, request resource.
 	if response.Diagnostics.HasError() {
 		return
 	}
-	err = r.waitVersion(ctx, &model, operationTimeout(ctx, model.Timeouts, "create"), action.RetryAfter, validatedVersionStatus, false)
+	err = r.waitVersion(ctx, &model, timeout, action.RetryAfter, validatedVersionStatus, false)
 	response.Diagnostics.Append(response.State.Set(stateCtx, &model)...)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "create", err)
+		addVersionError(&response.Diagnostics, "create", err, model.ID.ValueString())
 	}
 }
 
@@ -370,13 +379,20 @@ func setVersionState(ctx context.Context, model *componentVersionModel, version 
 	model.LicenseDashboard, model.Notes = types.StringPointerValue(version.LicenseDashboard), types.StringPointerValue(version.Notes)
 	model.CreatedAt, model.CreatedBy = types.StringValue(version.CreatedAt), types.StringValue(version.CreatedBy)
 	model.UpdatedAt, model.UpdatedBy = types.StringValue(version.UpdatedAt), types.StringValue(version.UpdatedBy)
-	definition, err := normalizeDefinition(string(version.Definition))
-	if err != nil {
-		return err
-	}
-	previousDefinition, previousErr := normalizeDefinition(model.DefinitionJSON.ValueString())
-	if previousErr != nil || string(previousDefinition) != string(definition) {
-		model.DefinitionJSON = types.StringValue(string(definition))
+	// S2S returns null before the definition has been published to S3, including
+	// early failures. Keep the last known definition while still refreshing status.
+	raw := strings.TrimSpace(string(version.Definition))
+	if raw != "" && raw != "null" {
+		definition, err := normalizeDefinition(raw)
+		if err != nil {
+			return err
+		}
+		previousDefinition, previousErr := normalizeDefinition(model.DefinitionJSON.ValueString())
+		if previousErr != nil || string(previousDefinition) != string(definition) {
+			model.DefinitionJSON = types.StringValue(string(definition))
+		}
+	} else if !pendingVersionStatus(version.Status) && version.Status != "FAILED" && version.Status != "RETIRED" {
+		return errors.New("component version definition unavailable in a published status")
 	}
 	dependencies := make([]dependencyModel, 0, len(version.Dependencies))
 	for _, dependency := range version.Dependencies {
@@ -416,12 +432,15 @@ func (r *componentVersionResource) waitVersion(ctx context.Context, model *compo
 			return vew.PollResult{}, err
 		}
 		candidate := *model
-		candidate.DefinitionJSON, candidate.Dependencies = definition, dependencies
+		candidate.Dependencies = dependencies
+		if raw := strings.TrimSpace(string(version.Definition)); raw != "" && raw != "null" {
+			candidate.DefinitionJSON = definition
+		}
 		if err := setVersionState(context.WithoutCancel(ctx), &candidate, version); err != nil {
 			return vew.PollResult{}, err
 		}
 		*model = candidate
-		return vew.PollResult{Status: version.Status}, nil
+		return vew.PollResult{Status: version.Status, RetryAfter: version.RetryAfter}, nil
 	}, evaluate)
 }
 
@@ -443,7 +462,7 @@ func validatedVersionStatus(status string) (bool, error) {
 	}
 }
 
-func addVersionError(diagnostics *diag.Diagnostics, operation string, err error) {
+func addVersionError(diagnostics *diag.Diagnostics, operation string, err error, resourceID string) {
 	message := "VEW component version " + operation + " failed. Refresh state and retry the operation."
 	var terminal *vew.TerminalStatusError
 	var timeout *vew.TimeoutError
@@ -452,14 +471,33 @@ func addVersionError(diagnostics *diag.Diagnostics, operation string, err error)
 	case errors.As(err, &terminal):
 		// Only statuses from the explicit state machine enter this error type.
 		message = "VEW component version reached " + terminal.Status + ". Refresh state and retry the operation."
-	case errors.As(err, &timeout):
+	case errors.As(err, &timeout), errors.Is(err, context.DeadlineExceeded):
 		message = "Timed out waiting for VEW component version " + operation + ". The latest recoverable state has been retained."
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.Canceled):
 		message = "VEW component version " + operation + " was cancelled. The latest recoverable state has been retained."
 	case errors.As(err, &api):
 		message = fmt.Sprintf("VEW component version %s failed (HTTP status %d).", operation, api.Status)
+		if safeVersionCorrelation.MatchString(api.Problem.Code) {
+			message += " VEW code: " + api.Problem.Code + "."
+		}
+		if safeVersionCorrelation.MatchString(api.Problem.RequestID) {
+			message += " Request ID: " + api.Problem.RequestID + "."
+		}
+	}
+	if safeVersionCorrelation.MatchString(resourceID) {
+		message += " Resource ID: " + resourceID + "."
 	}
 	diagnostics.AddError("Unable to "+operation+" VEW component version", message)
+}
+
+var safeVersionCorrelation = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+
+const versionUpdateRetryKey = "component_version_update_retry"
+
+func preserveVersionMutableConfiguration(model *componentVersionModel, prior componentVersionModel) {
+	model.Description, model.DefinitionJSON, model.Dependencies = prior.Description, prior.DefinitionJSON, prior.Dependencies
+	model.SoftwareVendor, model.SoftwareVersion = prior.SoftwareVendor, prior.SoftwareVersion
+	model.LicenseDashboard, model.Notes = prior.LicenseDashboard, prior.Notes
 }
 
 func (r *componentVersionResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
@@ -474,13 +512,27 @@ func (r *componentVersionResource) Read(ctx context.Context, request resource.Re
 		return
 	}
 	if err != nil {
-		addVersionError(&response.Diagnostics, "read", err)
+		addVersionError(&response.Diagnostics, "read", err, model.ID.ValueString())
 		return
 	}
+	prior := model
 	err = setVersionState(ctx, &model, version)
+	retry, diagnostics := request.Private.GetKey(ctx, versionUpdateRetryKey)
+	response.Diagnostics.Append(diagnostics...)
+	if string(retry) == "true" {
+		if version.Status == "VALIDATED" && err == nil {
+			if response.Private != nil {
+				response.Diagnostics.Append(response.Private.SetKey(ctx, versionUpdateRetryKey, nil)...)
+			}
+		} else {
+			// VEW persists attempted fields before validation. Keep a visible diff
+			// until the update validates so an unchanged reapply retries the PUT.
+			preserveVersionMutableConfiguration(&model, prior)
+		}
+	}
 	response.Diagnostics.Append(response.State.Set(context.WithoutCancel(ctx), &model)...)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "read", err)
+		addVersionError(&response.Diagnostics, "read", err, model.ID.ValueString())
 	}
 }
 
@@ -496,46 +548,65 @@ func (r *componentVersionResource) Update(ctx context.Context, request resource.
 	if response.Diagnostics.HasError() {
 		return
 	}
-	adopting := (model.ReleaseType.IsNull() || model.ReleaseType.IsUnknown()) && !plan.ReleaseType.IsNull() && !plan.ReleaseType.IsUnknown() && equivalentVersionConfiguration(ctx, model, plan)
+	prior := model
+	retry, privateDiagnostics := request.Private.GetKey(ctx, versionUpdateRetryKey)
+	response.Diagnostics.Append(privateDiagnostics...)
+	stateOnly := string(retry) != "true" && equivalentVersionConfiguration(ctx, model, plan)
 	model.ReleaseType, model.Timeouts = plan.ReleaseType, plan.Timeouts
 	stateCtx := context.WithoutCancel(ctx)
 	timeout := operationTimeout(ctx, plan.Timeouts, "update")
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// Always save the latest observation before reporting an operation failure.
-	defer func() { response.Diagnostics.Append(response.State.Set(stateCtx, &model)...) }()
+	mutationStarted, validated := false, false
+	defer func() {
+		if (mutationStarted || string(retry) == "true") && !validated {
+			preserveVersionMutableConfiguration(&model, prior)
+		}
+		response.Diagnostics.Append(response.State.Set(stateCtx, &model)...)
+	}()
 	version, err := r.getVersion(ctx, &model)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "update", err)
+		addVersionError(&response.Diagnostics, "update", err, model.ID.ValueString())
 		return
 	}
 	if err = setVersionState(stateCtx, &model, version); err != nil {
-		addVersionError(&response.Diagnostics, "update", err)
+		addVersionError(&response.Diagnostics, "update", err, model.ID.ValueString())
 		return
 	}
-	if pendingVersionStatus(model.Status.ValueString()) {
-		if err = r.waitVersion(ctx, &model, timeout, 0, validatedVersionStatus, false); err != nil {
-			addVersionError(&response.Diagnostics, "update", err)
-			return
-		}
-	}
-	if adopting && equivalentVersionConfiguration(ctx, model, plan) {
+	// Formatting, dependency order, timeout edits, and import adoption do not
+	// mutate VEW. This also works for pending, failed, and immutable versions.
+	if stateOnly && equivalentVersionConfiguration(ctx, model, plan) {
 		model.DefinitionJSON, model.Dependencies = plan.DefinitionJSON, plan.Dependencies
 		return
 	}
+	if pendingVersionStatus(model.Status.ValueString()) {
+		if err = r.waitVersion(ctx, &model, timeout, 0, deletableVersionStatus, false); err != nil {
+			addVersionError(&response.Diagnostics, "update", err, model.ID.ValueString())
+			return
+		}
+	}
 	if model.Status.ValueString() != "VALIDATED" && model.Status.ValueString() != "FAILED" {
-		addVersionError(&response.Diagnostics, "update", errors.New("version cannot be updated in its current status"))
+		addVersionError(&response.Diagnostics, "update", errors.New("version cannot be updated in its current status"), model.ID.ValueString())
 		return
+	}
+	mutationStarted = true
+	if response.Private != nil {
+		response.Diagnostics.Append(response.Private.SetKey(stateCtx, versionUpdateRetryKey, []byte("true"))...)
 	}
 	action, err := r.client.UpdateComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), model.ID.ValueString(), input)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "update", err)
+		addVersionError(&response.Diagnostics, "update", err, model.ID.ValueString())
 		return
 	}
 	model.DefinitionJSON, model.Dependencies = plan.DefinitionJSON, plan.Dependencies
 	err = r.waitVersion(ctx, &model, timeout, action.RetryAfter, validatedVersionStatus, false)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "update", err)
+		addVersionError(&response.Diagnostics, "update", err, model.ID.ValueString())
+		return
+	}
+	validated = true
+	if response.Private != nil {
+		response.Diagnostics.Append(response.Private.SetKey(stateCtx, versionUpdateRetryKey, nil)...)
 	}
 }
 
@@ -569,16 +640,16 @@ func (r *componentVersionResource) Delete(ctx context.Context, request resource.
 		return
 	}
 	if err != nil {
-		addVersionError(&response.Diagnostics, "delete", err)
+		addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 		return
 	}
 	if err = setVersionState(stateCtx, &model, version); err != nil {
-		addVersionError(&response.Diagnostics, "delete", err)
+		addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 		return
 	}
 	if pendingVersionStatus(model.Status.ValueString()) {
 		if err = r.waitVersion(ctx, &model, timeout, 0, deletableVersionStatus, true); err != nil {
-			addVersionError(&response.Diagnostics, "delete", err)
+			addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 			return
 		}
 	}
@@ -587,7 +658,7 @@ func (r *componentVersionResource) Delete(ctx context.Context, request resource.
 		return
 	}
 	if _, err = deletableVersionStatus(model.Status.ValueString()); err != nil {
-		addVersionError(&response.Diagnostics, "delete", err)
+		addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 		return
 	}
 	action, err := r.client.RetireComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), model.ID.ValueString())
@@ -596,12 +667,12 @@ func (r *componentVersionResource) Delete(ctx context.Context, request resource.
 		return
 	}
 	if err != nil {
-		addVersionError(&response.Diagnostics, "delete", err)
+		addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 		return
 	}
 	err = r.waitVersion(ctx, &model, timeout, action.RetryAfter, retiredVersionStatus, true)
 	if err != nil {
-		addVersionError(&response.Diagnostics, "delete", err)
+		addVersionError(&response.Diagnostics, "delete", err, model.ID.ValueString())
 		return
 	}
 	removed = true

@@ -160,7 +160,17 @@ resource "vew_component_version" "test" {
   component_id      = vew_component.disposable.id
   description       = %q
   release_type      = "PATCH"
-  definition_json   = jsonencode({ phases = [] })
+  definition_json = jsonencode({
+    schemaVersion = "1.0"
+    phases = [{
+      name = "build"
+      steps = [{
+        name   = "HarmlessCheck"
+        action = "ExecuteBash"
+        inputs = { commands = ["true"] }
+      }]
+    }]
+  })
   dependencies      = []
   software_vendor   = "Terraform acceptance test"
   software_version  = "1.0.0"

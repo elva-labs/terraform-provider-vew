@@ -79,6 +79,10 @@ It creates a uniquely named disposable `vew_component` in the supplied project,
 creates and updates its component version, verifies import, retires the version,
 and archives the disposable component during cleanup. It never uses an existing
 component ID. The test is skipped unless every gate above is set.
+The process timeout is four hours to accommodate create, update, retirement,
+and cleanup. To compile and check both acceptance gates without contacting VEW,
+run `make testacc TF_ACC=` and
+`make testacc-component-version TF_ACC= VEW_ACC_COMPONENT_VERSION=`.
 
 ## Local Terraform development override
 
@@ -173,6 +177,8 @@ to an empty list; `license_dashboard` and `notes` are optional. Each dependency
 contains `component_id`, `component_name`, `version_id`, `version_name`, and
 `order`; `type` defaults to `HELPER`, while `position` is optional. The provider
 computes `id`, `name`, `status`, and the created/updated timestamps and actors.
+Configured `license_dashboard` and `notes` must be non-empty; omit them or use
+`null` to leave them unset.
 
 `definition_json` is retained in Terraform state. Do not put secrets or other
 sensitive content in the definition unless storing that content in state is
@@ -187,9 +193,11 @@ created or updated version asynchronously: Terraform waits through `CREATING`,
 update, and 30 minutes for delete; override them with a `timeouts` block using
 Go duration strings, for example `create = "90m"`.
 
-If VEW reports `FAILED`, Terraform preserves the IDs and latest remote state
-and returns an error. Correct the issue and run apply again to recover; do not
-remove the resource from state merely to retry. Terraform delete maps to VEW
+If VEW reports `FAILED`, Terraform preserves the IDs and latest lifecycle state
+and returns an error. After a failed update, it also preserves the prior mutable
+configuration through refresh so an unchanged apply retries validation. Correct
+the issue and run apply again to recover; do not remove the resource from state
+merely to retry. Terraform delete maps to VEW
 retire, not physical deletion. A remote `RETIRED` version or `404` is therefore
 treated as absent from state.
 
@@ -197,6 +205,9 @@ VEW does not return the configured release type. Immediately after import,
 Terraform permits one-time adoption of the configured `release_type` without an
 update; later changes to that value require replacement. Release itself is out
 of scope for this resource and is not managed by Terraform.
+Definition formatting, equivalent dependency ordering, and timeout-only edits
+update Terraform state without a VEW mutation, including for released imports.
+Genuine mutable changes to a released version require replacement.
 
 Component-version creation uses one idempotency key for its transport retries.
 If Terraform crashes after VEW accepts the request but before Terraform records

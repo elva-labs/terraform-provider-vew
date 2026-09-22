@@ -53,6 +53,7 @@ type UpdateComponentVersionInput struct {
 
 // ComponentVersion is VEW's component-version representation.
 type ComponentVersion struct {
+	RetryAfter       time.Duration   `json:"-"`
 	ComponentID      string          `json:"componentId"`
 	ID               string          `json:"componentVersionId"`
 	Description      string          `json:"componentVersionDescription"`
@@ -107,7 +108,7 @@ func (c *Client) GetComponentVersion(ctx context.Context, projectID, componentID
 	if err != nil {
 		return ComponentVersion{}, err
 	}
-	response, _, err := c.transport.Do(ctx, http.MethodGet, segments, nil, "")
+	response, headers, err := c.transport.Do(ctx, http.MethodGet, segments, nil, "")
 	if err != nil {
 		return ComponentVersion{}, err
 	}
@@ -122,6 +123,7 @@ func (c *Client) GetComponentVersion(ctx context.Context, projectID, componentID
 		return ComponentVersion{}, errors.New("VEW component version response missing component version")
 	}
 	envelope.ComponentVersion.Definition = envelope.Definition
+	envelope.ComponentVersion.RetryAfter = vew.RetryAfter(headers, time.Now())
 	return envelope.ComponentVersion, nil
 }
 

@@ -26,6 +26,7 @@ import (
 type immediateVersionWaiter struct {
 	timeout, delay time.Duration
 	deadlines      []time.Time
+	pollDelays     []time.Duration
 	limit          int
 	afterRead      func()
 }
@@ -46,6 +47,7 @@ func (w *immediateVersionWaiter) Until(ctx context.Context, timeout, delay time.
 		if w.afterRead != nil {
 			w.afterRead()
 		}
+		w.pollDelays = append(w.pollDelays, result.RetryAfter)
 		if done, err := evaluate(result.Status); done || err != nil {
 			return err
 		}

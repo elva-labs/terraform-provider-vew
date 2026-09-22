@@ -49,6 +49,7 @@ type VersionResponse struct {
 	Version    components.ComponentVersion
 	StatusCode int
 	Detail     string
+	RetryAfter string
 }
 
 type VersionRequest struct {
@@ -119,6 +120,7 @@ func (f *VEWServer) handleVersion(w http.ResponseWriter, request *http.Request) 
 			f.writeProblem(w, response.StatusCode, response.Detail)
 			return
 		}
+		w.Header().Set("Retry-After", response.RetryAfter)
 		f.writeJSON(w, 200, map[string]any{"component_version": response.Version, "componentVersionDefinition": response.Version.Definition})
 		return
 	}
