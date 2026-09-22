@@ -112,8 +112,8 @@ func (c *Client) GetComponentVersion(ctx context.Context, projectID, componentID
 		return ComponentVersion{}, err
 	}
 	var envelope struct {
-		ComponentVersion ComponentVersion  `json:"component_version"`
-		Definition       json.RawMessage `json:"componentVersionDefinition"`
+		ComponentVersion ComponentVersion `json:"component_version"`
+		Definition       json.RawMessage  `json:"componentVersionDefinition"`
 	}
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return ComponentVersion{}, errors.New("VEW component version response could not be decoded")

@@ -1,7 +1,8 @@
 # Terraform Provider for VEW
 
-This proof-of-concept Terraform provider manages VEW components. It uses the
-VEW OAuth 2.0 client-credentials flow and exposes the `vew_component` resource.
+This proof-of-concept Terraform provider manages VEW components and component
+versions. It uses the VEW OAuth 2.0 client-credentials flow and exposes the
+`vew_component` and `vew_component_version` resources.
 
 ## Prerequisites
 
@@ -62,6 +63,22 @@ make testacc
 imports it, and archives it during cleanup. Run it only against a disposable
 project; it has live API side effects and may leave an archived component if
 the run is interrupted.
+
+The component-version acceptance test is separately and explicitly gated:
+
+```shell
+TF_ACC=1 VEW_ACC_COMPONENT_VERSION=1 \
+  VEW_API_URL=https://vew.example/api \
+  VEW_TOKEN_URL=https://oauth.example/token \
+  VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
+  VEW_TEST_PROJECT_ID=prog-73488 \
+  make testacc-component-version
+```
+
+It creates a uniquely named disposable `vew_component` in the supplied project,
+creates and updates its component version, verifies import, retires the version,
+and archives the disposable component during cleanup. It never uses an existing
+component ID. The test is skipped unless every gate above is set.
 
 ## Local Terraform development override
 
@@ -140,3 +157,65 @@ terraform import vew_component.example prog-73488/cmp-123
 After import, Terraform refreshes the component and populates its computed
 attributes. The imported configuration must match the component's replacement
 fields, or Terraform will plan a replacement.
+
+## Component version resource
+
+The complete native Terraform example is in
+[`examples/resources/vew_component_version/resource.tf`](examples/resources/vew_component_version/resource.tf).
+It references its `vew_component` parent directly and uses `jsonencode` for the
+definition.
+
+### Resource attributes
+
+`project_id`, `component_id`, `description`, `release_type`, `definition_json`,
+`software_vendor`, and `software_version` are required. `dependencies` defaults
+to an empty list; `license_dashboard` and `notes` are optional. Each dependency
+contains `component_id`, `component_name`, `version_id`, `version_name`, and
+`order`; `type` defaults to `HELPER`, while `position` is optional. The provider
+computes `id`, `name`, `status`, and the created/updated timestamps and actors.
+
+`definition_json` is retained in Terraform state. Do not put secrets or other
+sensitive content in the definition unless storing that content in state is
+acceptable for your Terraform backend and access controls.
+
+### Lifecycle semantics
+
+Changing `project_id` or `component_id` replaces the resource. VEW validates a
+created or updated version asynchronously: Terraform waits through `CREATING`,
+`CREATED`, `TESTING`, and `UPDATING`, and completes only when the status is
+`VALIDATED`. The default timeouts are 60 minutes for create, 60 minutes for
+update, and 30 minutes for delete; override them with a `timeouts` block using
+Go duration strings, for example `create = "90m"`.
+
+If VEW reports `FAILED`, Terraform preserves the IDs and latest remote state
+and returns an error. Correct the issue and run apply again to recover; do not
+remove the resource from state merely to retry. Terraform delete maps to VEW
+retire, not physical deletion. A remote `RETIRED` version or `404` is therefore
+treated as absent from state.
+
+VEW does not return the configured release type. Immediately after import,
+Terraform permits one-time adoption of the configured `release_type` without an
+update; later changes to that value require replacement. Release itself is out
+of scope for this resource and is not managed by Terraform.
+
+Component-version creation uses one idempotency key for its transport retries.
+If Terraform crashes after VEW accepts the request but before Terraform records
+the response, a later apply cannot reuse that key: inspect VEW before retrying
+to avoid accidentally creating a duplicate version. This is the idempotency
+crash window.
+
+## Component version import
+
+Import IDs use `project_id/component_id/version_id`:
+
+```shell
+terraform import vew_component_version.example PROJECT_ID/COMPONENT_ID/VERSION_ID
+```
+
+## Domain package layout
+
+Shared OAuth, HTTP transport, errors, and polling live in `internal/vew`.
+Component and component-version API models and endpoint clients live in
+`internal/vew/components`. Terraform resource implementations live in
+`internal/provider/components`, while `internal/providerdata` carries the
+configured domain interfaces from the root provider to those resources.
