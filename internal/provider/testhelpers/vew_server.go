@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 )
 
@@ -36,6 +37,44 @@ type VEWServer struct {
 	update         components.UpdateComponentInput
 	failGets       int
 	failGetDetail  string
+}
+
+// Snapshot exposes observed fake-server behavior to external protocol tests.
+type Snapshot struct {
+	Archived                                         bool
+	CreateCalls, GetCalls, UpdateCalls, ArchiveCalls int
+	IdempotencyKey                                   string
+	Create                                           components.CreateComponentInput
+	Update                                           components.UpdateComponentInput
+}
+
+func (f *VEWServer) Snapshot() Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return Snapshot{Archived: f.archived, CreateCalls: f.createCalls, GetCalls: f.getCalls, UpdateCalls: f.updateCalls, ArchiveCalls: f.archiveCalls, IdempotencyKey: f.idempotencyKey, Create: f.create, Update: f.update}
+}
+
+// FailNextGets makes the next count component reads return a 503 problem.
+func (f *VEWServer) FailNextGets(count int, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failGets, f.failGetDetail = count, detail
+}
+
+// ComponentAPI returns a real component client configured against this server.
+func (f *VEWServer) ComponentAPI(t *testing.T) components.API {
+	t.Helper()
+	transport, err := vew.NewTransport(vew.Config{APIURL: f.server.URL, TokenURL: f.server.URL + "/oauth/token", ClientID: testClientID, ClientSecret: testClientSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return components.NewClient(transport)
+}
+
+func (f *VEWServer) SetComponent(component components.Component, notFound bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.component, f.notFound = component, notFound
 }
 
 func NewVEWServer(t *testing.T) *VEWServer {

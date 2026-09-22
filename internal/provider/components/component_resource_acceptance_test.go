@@ -19,7 +19,19 @@ const testAccComponentResourceName = "vew_component.test"
 func TestAccComponentResource(t *testing.T) {
 	projectID := os.Getenv("VEW_PROJECT_ID")
 	name := fmt.Sprintf("tf-acc-%d", time.Now().UTC().UnixNano())
-	testresource.Test(t, testresource.TestCase{ProtoV6ProviderFactories: testProtoV6ProviderFactories(), PreCheck: func() { testAccPreCheck(t) }, CheckDestroy: testAccCheckComponentDestroy(projectID), Steps: []testresource.TestStep{{Config: testAccComponentResourceConfig(projectID, name, "created by Terraform acceptance test")}}})
+	initialDescription := "created by Terraform acceptance test"
+	updatedDescription := "updated by Terraform acceptance test"
+	testresource.Test(t, testresource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories(),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		CheckDestroy:             testAccCheckComponentDestroy(projectID),
+		Steps: []testresource.TestStep{
+			{Config: testAccComponentResourceConfig(projectID, name, initialDescription), Check: testresource.ComposeTestCheckFunc(testresource.TestCheckResourceAttrSet(testAccComponentResourceName, "id"), testresource.TestCheckResourceAttr(testAccComponentResourceName, "name", name), testresource.TestCheckResourceAttr(testAccComponentResourceName, "description", initialDescription), testresource.TestCheckResourceAttr(testAccComponentResourceName, "status", "CREATED"))},
+			{Config: testAccComponentResourceConfig(projectID, name, initialDescription), PlanOnly: true},
+			{Config: testAccComponentResourceConfig(projectID, name, updatedDescription), Check: testresource.ComposeTestCheckFunc(testresource.TestCheckResourceAttr(testAccComponentResourceName, "name", name), testresource.TestCheckResourceAttr(testAccComponentResourceName, "description", updatedDescription))},
+			{ResourceName: testAccComponentResourceName, ImportState: true, ImportStateIdFunc: testAccComponentImportID(projectID), ImportStateVerify: true},
+		},
+	})
 }
 
 func testAccPreCheck(t *testing.T) {
@@ -35,7 +47,26 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 func testAccComponentResourceConfig(projectID, name, description string) string {
-	return fmt.Sprintf("resource \\\"vew_component\\\" \\\"test\\\" { project_id=%q name=%q description=%q platform=\\\"Linux\\\" supported_architectures=[\\\"arm64\\\"] supported_os_versions=[\\\"Ubuntu 24\\\"] }", projectID, name, description)
+	return fmt.Sprintf(`
+resource "vew_component" "test" {
+  project_id              = %q
+  name                    = %q
+  description             = %q
+  platform                = "Linux"
+  supported_architectures = ["arm64", "x86_64"]
+  supported_os_versions   = ["Ubuntu 24"]
+}
+`, projectID, name, description)
+}
+
+func testAccComponentImportID(projectID string) testresource.ImportStateIdFunc {
+	return func(state *terraform.State) (string, error) {
+		resource, ok := state.RootModule().Resources[testAccComponentResourceName]
+		if !ok || resource.Primary == nil || resource.Primary.ID == "" {
+			return "", fmt.Errorf("component state is missing an ID")
+		}
+		return projectID + "/" + resource.Primary.ID, nil
+	}
 }
 func testAccCheckComponentDestroy(projectID string) testresource.TestCheckFunc {
 	return func(state *terraform.State) error {
