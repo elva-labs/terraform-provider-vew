@@ -275,6 +275,22 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 	if response.Diagnostics.HasError() {
 		return
 	}
+	if request.Private != nil {
+		retry, diagnostics := request.Private.GetKey(ctx, versionUpdateRetryKey)
+		response.Diagnostics.Append(diagnostics...)
+		if response.Diagnostics.HasError() {
+			return
+		}
+		if string(retry) == "true" {
+			// Private state is opaque to Terraform, so make the outstanding
+			// reconciliation visible without changing the configured fields.
+			plan.Status = types.StringUnknown()
+			response.Diagnostics.Append(response.Plan.Set(ctx, &plan)...)
+			if response.Diagnostics.HasError() {
+				return
+			}
+		}
+	}
 
 	if !state.ReleaseType.IsUnknown() && !state.ReleaseType.IsNull() && !plan.ReleaseType.IsUnknown() && !plan.ReleaseType.IsNull() && !state.ReleaseType.Equal(plan.ReleaseType) {
 		response.RequiresReplace = append(response.RequiresReplace, path.Root("release_type"))

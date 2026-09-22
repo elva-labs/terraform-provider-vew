@@ -261,6 +261,54 @@ func TestComponentVersionFailedUpdateUnchangedReapplyRetriesProtocol(t *testing.
 	})
 }
 
+func TestComponentVersionFailedUpdateRollbackReconcilesProtocol(t *testing.T) {
+	fake := testhelpers.NewVEWServer(t)
+	remote := vewcomponents.ComponentVersion{ID: "version", ComponentID: "cmp-123", Description: "configuration A", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, Status: "VALIDATED"}
+	fake.QueueVersionActionReads("POST", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	failed := remote
+	failed.Description, failed.Status = "attempted configuration B", "FAILED"
+	fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: failed})
+	retired := remote
+	retired.Status = "RETIRED"
+	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
+	config := fake.ProviderConfig() + componentVersionResourceConfig()
+	rollback := strings.Replace(config, "created by provider test", "configuration A", 1)
+	attempted := strings.Replace(rollback, "configuration A", "attempted configuration B", 1)
+	testresource.Test(t, testresource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"vew": providerserver.NewProtocol6WithError(&fastVersionProvider{Provider: rootprovider.New("test")()})},
+		Steps: []testresource.TestStep{
+			{Config: rollback},
+			{Config: attempted, ExpectError: regexp.MustCompile(`reached FAILED`)},
+			{Config: rollback, PlanOnly: true, ExpectNonEmptyPlan: true},
+			{Config: rollback, PreConfig: func() {
+				remote.Status = "VALIDATED"
+				fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+			}, Check: testresource.ComposeTestCheckFunc(
+				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "VALIDATED"),
+				testresource.TestCheckResourceAttr("vew_component_version.test", "description", "configuration A"),
+				func(*terraform.State) error {
+					puts := 0
+					for _, request := range fake.VersionRequests() {
+						if request.Method != "PUT" {
+							continue
+						}
+						puts++
+						if puts == 2 && !strings.Contains(string(request.Body), `"componentVersionDescription":"configuration A"`) {
+							return fmt.Errorf("rollback PUT body = %s", request.Body)
+						}
+					}
+					if puts != 2 {
+						return fmt.Errorf("rollback issued %d PUTs, want failed attempt plus rollback", puts)
+					}
+					return nil
+				},
+			)},
+			{Config: rollback, PlanOnly: true, ExpectNonEmptyPlan: false},
+		},
+	})
+}
+
 func componentVersionResourceConfig() string {
 	return `
 resource "vew_component_version" "test" {
