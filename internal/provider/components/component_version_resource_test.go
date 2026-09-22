@@ -182,6 +182,46 @@ func TestComponentVersionResourceValidateConfigDefersUnknownValues(t *testing.T)
 	}
 }
 
+func TestComponentVersionResourceValidateConfigDefersUnknownNestedDependencyValues(t *testing.T) {
+	r := NewComponentVersionResource().(*componentVersionResource)
+	for _, test := range []struct {
+		name   string
+		mutate func(*dependencyModel)
+	}{
+		{"order", func(dependency *dependencyModel) { dependency.Order = types.Int64Unknown() }},
+		{"type", func(dependency *dependencyModel) { dependency.Type = types.StringUnknown() }},
+		{"position", func(dependency *dependencyModel) { dependency.Position = types.StringUnknown() }},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			model := validComponentVersionModel(t)
+			dependency := dependencyModelWithOrder(1)
+			test.mutate(&dependency)
+			model.Dependencies = dependencyList(dependency)
+			var response resource.ValidateConfigResponse
+			r.ValidateConfig(context.Background(), resource.ValidateConfigRequest{Config: componentVersionConfig(t, r, model)}, &response)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("unknown dependency.%s should defer validation, diagnostics = %v", test.name, response.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestComponentVersionResourceValidateConfigRejectsKnownInvalidDependencyAlongsideDeferredDependency(t *testing.T) {
+	r := NewComponentVersionResource().(*componentVersionResource)
+	model := validComponentVersionModel(t)
+	deferred := dependencyModelWithOrder(1)
+	deferred.Order = types.Int64Unknown()
+	invalid := dependencyModelWithOrder(2)
+	invalid.Type = types.StringValue("RUNTIME")
+	model.Dependencies = dependencyList(deferred, invalid)
+	var response resource.ValidateConfigResponse
+	r.ValidateConfig(context.Background(), resource.ValidateConfigRequest{Config: componentVersionConfig(t, r, model)}, &response)
+	if !response.Diagnostics.HasError() || !diagnosticsContain(response.Diagnostics, "dependency[1].type") {
+		t.Fatalf("diagnostics = %v, want invalid known dependency[1].type", response.Diagnostics)
+	}
+}
+
 func TestOperationTimeoutUsesDefaultsAndConfiguredValues(t *testing.T) {
 	timeouts := types.ObjectNull(timeoutAttributeTypes)
 	for _, test := range []struct {

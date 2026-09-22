@@ -135,7 +135,6 @@ func componentVersionDependenciesAttribute() resourceschema.ListNestedAttribute 
 
 func (r *componentVersionResource) Configure(_ context.Context, request resource.ConfigureRequest, response *resource.ConfigureResponse) {
 	if request.ProviderData == nil {
-		response.Diagnostics.AddError("Missing Resource Provider Data", "Expected provider data to be providerdata.Data with ComponentVersions and Waiter.")
 		return
 	}
 	data, ok := request.ProviderData.(providerdata.Data)
@@ -174,8 +173,7 @@ func (r *componentVersionResource) ValidateConfig(ctx context.Context, request r
 		}
 	}
 	if !config.Dependencies.IsUnknown() && !config.Dependencies.IsNull() {
-		_, diagnostics := expandDependencies(ctx, config.Dependencies)
-		response.Diagnostics.Append(diagnostics...)
+		response.Diagnostics.Append(validateDependencies(ctx, config.Dependencies)...)
 	}
 	response.Diagnostics.Append(validateTimeouts(ctx, config.Timeouts)...)
 }
@@ -259,7 +257,7 @@ func parseComponentVersionImportID(value string) (projectID, componentID, versio
 }
 
 func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resource.ModifyPlanRequest, response *resource.ModifyPlanResponse) {
-	if request.Plan.Raw.IsNull() {
+	if request.Plan.Raw.IsNull() || request.State.Raw.IsNull() {
 		return
 	}
 	var state, plan componentVersionModel

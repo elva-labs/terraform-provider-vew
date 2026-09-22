@@ -37,9 +37,57 @@ func expandDependencies(ctx context.Context, dependencies types.List) ([]vewcomp
 		return nil, diagnostics
 	}
 
+	diagnostics.Append(validateDependencyModels(models, false)...)
+	if diagnostics.HasError() {
+		return nil, diagnostics
+	}
+
 	expanded := make([]vewcomponents.Dependency, 0, len(models))
+	for _, model := range models {
+		dependencyType := "HELPER"
+		if !model.Type.IsNull() {
+			dependencyType = model.Type.ValueString()
+		}
+
+		var position *string
+		if !model.Position.IsNull() {
+			positionValue := model.Position.ValueString()
+			position = &positionValue
+		}
+
+		expanded = append(expanded, vewcomponents.Dependency{
+			ComponentID:   model.ComponentID.ValueString(),
+			ComponentName: model.ComponentName.ValueString(),
+			VersionID:     model.VersionID.ValueString(),
+			VersionName:   model.VersionName.ValueString(),
+			Type:          dependencyType,
+			Order:         model.Order.ValueInt64(),
+			Position:      position,
+		})
+	}
+
+	sort.SliceStable(expanded, func(left, right int) bool {
+		return expanded[left].Order < expanded[right].Order
+	})
+	return expanded, diagnostics
+}
+
+func validateDependencies(ctx context.Context, dependencies types.List) diag.Diagnostics {
+	var models []dependencyModel
+	diagnostics := dependencies.ElementsAs(ctx, &models, false)
+	if diagnostics.HasError() {
+		return diagnostics
+	}
+	return validateDependencyModels(models, true)
+}
+
+func validateDependencyModels(models []dependencyModel, deferUnknown bool) diag.Diagnostics {
+	var diagnostics diag.Diagnostics
 	seenOrders := make(map[int64]int, len(models))
 	for index, model := range models {
+		if deferUnknown && dependencyHasUnknownValue(model) {
+			continue
+		}
 		if model.Order.IsNull() || model.Order.IsUnknown() || model.Order.ValueInt64() <= 0 {
 			diagnostics.AddError(
 				"Invalid component version dependency",
@@ -75,7 +123,6 @@ func expandDependencies(ctx context.Context, dependencies types.List) ([]vewcomp
 			}
 		}
 
-		var position *string
 		if !model.Position.IsNull() {
 			if model.Position.IsUnknown() {
 				diagnostics.AddError(
@@ -84,33 +131,24 @@ func expandDependencies(ctx context.Context, dependencies types.List) ([]vewcomp
 				)
 				continue
 			}
-			positionValue := model.Position.ValueString()
-			if positionValue != "APPEND" && positionValue != "PREPEND" {
+			if positionValue := model.Position.ValueString(); positionValue != "APPEND" && positionValue != "PREPEND" {
 				diagnostics.AddError(
 					"Invalid component version dependency",
 					fmt.Sprintf("dependency[%d].position must be APPEND or PREPEND.", index),
 				)
 				continue
 			}
-			position = &positionValue
 		}
-
-		expanded = append(expanded, vewcomponents.Dependency{
-			ComponentID:   model.ComponentID.ValueString(),
-			ComponentName: model.ComponentName.ValueString(),
-			VersionID:     model.VersionID.ValueString(),
-			VersionName:   model.VersionName.ValueString(),
-			Type:          dependencyType,
-			Order:         model.Order.ValueInt64(),
-			Position:      position,
-		})
 	}
-	if diagnostics.HasError() {
-		return nil, diagnostics
-	}
+	return diagnostics
+}
 
-	sort.SliceStable(expanded, func(left, right int) bool {
-		return expanded[left].Order < expanded[right].Order
-	})
-	return expanded, diagnostics
+func dependencyHasUnknownValue(model dependencyModel) bool {
+	return model.ComponentID.IsUnknown() ||
+		model.ComponentName.IsUnknown() ||
+		model.VersionID.IsUnknown() ||
+		model.VersionName.IsUnknown() ||
+		model.Type.IsUnknown() ||
+		model.Order.IsUnknown() ||
+		model.Position.IsUnknown()
 }
