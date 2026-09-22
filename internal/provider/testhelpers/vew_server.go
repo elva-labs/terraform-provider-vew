@@ -1,4 +1,4 @@
-package provider
+package testhelpers
 
 import (
 	"encoding/json"
@@ -10,9 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/elva-labs/terraform-provider-vew/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 )
 
 const (
@@ -21,12 +19,12 @@ const (
 	testAccessToken  = "terraform-test-access-token"
 )
 
-type fakeVEWServer struct {
+type VEWServer struct {
 	t *testing.T
 
 	mu             sync.Mutex
 	server         *httptest.Server
-	component      client.Component
+	component      components.Component
 	archived       bool
 	notFound       bool
 	createCalls    int
@@ -34,21 +32,21 @@ type fakeVEWServer struct {
 	updateCalls    int
 	archiveCalls   int
 	idempotencyKey string
-	create         client.CreateComponentInput
-	update         client.UpdateComponentInput
+	create         components.CreateComponentInput
+	update         components.UpdateComponentInput
 	failGets       int
 	failGetDetail  string
 }
 
-func newFakeVEWServer(t *testing.T) *fakeVEWServer {
+func NewVEWServer(t *testing.T) *VEWServer {
 	t.Helper()
-	fake := &fakeVEWServer{t: t}
+	fake := &VEWServer{t: t}
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.handle))
 	t.Cleanup(fake.server.Close)
 	return fake
 }
 
-func (f *fakeVEWServer) handle(w http.ResponseWriter, request *http.Request) {
+func (f *VEWServer) handle(w http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/oauth/token" {
 		f.handleToken(w, request)
 		return
@@ -80,7 +78,7 @@ func (f *fakeVEWServer) handle(w http.ResponseWriter, request *http.Request) {
 	f.writeProblem(w, http.StatusNotFound, "not found")
 }
 
-func (f *fakeVEWServer) handleToken(w http.ResponseWriter, request *http.Request) {
+func (f *VEWServer) handleToken(w http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		f.writeProblem(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -97,7 +95,7 @@ func (f *fakeVEWServer) handleToken(w http.ResponseWriter, request *http.Request
 	f.writeJSON(w, http.StatusOK, map[string]any{"access_token": testAccessToken, "expires_in": 3600})
 }
 
-func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Request) {
+func (f *VEWServer) handleCreate(w http.ResponseWriter, request *http.Request) {
 	payload, ok := exactJSONBody(request, "componentName", "componentDescription", "componentPlatform", "componentSupportedArchitectures", "componentSupportedOsVersions")
 	if !ok {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
@@ -118,13 +116,13 @@ func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Reques
 		f.writeProblem(w, http.StatusBadRequest, "invalid component create request")
 		return
 	}
-	input := client.CreateComponentInput{Name: name, Description: description, Platform: platform, SupportedArchitectures: architectures, SupportedOSVersions: osVersions}
+	input := components.CreateComponentInput{Name: name, Description: description, Platform: platform, SupportedArchitectures: architectures, SupportedOSVersions: osVersions}
 	f.mu.Lock()
 	f.createCalls++
 	f.idempotencyKey = request.Header.Get("Idempotency-Key")
 	f.create = input
 	f.archived, f.notFound = false, false
-	f.component = client.Component{
+	f.component = components.Component{
 		ID: "cmp-123", Name: input.Name, Description: input.Description, Platform: input.Platform,
 		SupportedArchitectures: input.SupportedArchitectures, SupportedOSVersions: input.SupportedOSVersions,
 		Status: "CREATED", CreatedAt: "2026-09-21T12:00:00Z", CreatedBy: "terraform-test-user",
@@ -134,7 +132,7 @@ func (f *fakeVEWServer) handleCreate(w http.ResponseWriter, request *http.Reques
 	f.writeJSON(w, http.StatusCreated, map[string]any{"componentId": "cmp-123"})
 }
 
-func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
+func (f *VEWServer) handleGet(w http.ResponseWriter) {
 	f.mu.Lock()
 	f.getCalls++
 	component, missing := f.component, f.notFound
@@ -155,13 +153,13 @@ func (f *fakeVEWServer) handleGet(w http.ResponseWriter) {
 	f.writeJSON(w, http.StatusOK, map[string]any{"component": fakeComponentJSON(component)})
 }
 
-func (f *fakeVEWServer) handleUpdate(w http.ResponseWriter, request *http.Request) {
+func (f *VEWServer) handleUpdate(w http.ResponseWriter, request *http.Request) {
 	payload, ok := exactJSONBody(request, "componentDescription")
 	if !ok {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component update request")
 		return
 	}
-	var input client.UpdateComponentInput
+	var input components.UpdateComponentInput
 	if err := json.Unmarshal(payload, &input); err != nil {
 		f.writeProblem(w, http.StatusBadRequest, "invalid component update request")
 		return
@@ -197,7 +195,7 @@ func exactJSONBody(request *http.Request, expectedKeys ...string) ([]byte, bool)
 	return payload, true
 }
 
-func (f *fakeVEWServer) handleArchive(w http.ResponseWriter) {
+func (f *VEWServer) handleArchive(w http.ResponseWriter) {
 	f.mu.Lock()
 	f.archiveCalls++
 	f.archived = true
@@ -206,7 +204,7 @@ func (f *fakeVEWServer) handleArchive(w http.ResponseWriter) {
 	f.writeJSON(w, http.StatusNoContent, nil)
 }
 
-func (f *fakeVEWServer) writeJSON(w http.ResponseWriter, status int, value any) {
+func (f *VEWServer) writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if value != nil {
@@ -216,11 +214,11 @@ func (f *fakeVEWServer) writeJSON(w http.ResponseWriter, status int, value any) 
 	}
 }
 
-func (f *fakeVEWServer) writeProblem(w http.ResponseWriter, status int, detail string) {
+func (f *VEWServer) writeProblem(w http.ResponseWriter, status int, detail string) {
 	f.writeJSON(w, status, map[string]any{"status": status, "title": http.StatusText(status), "detail": detail, "code": fmt.Sprintf("HTTP_%d", status), "retryable": false})
 }
 
-func fakeComponentJSON(component client.Component) map[string]any {
+func fakeComponentJSON(component components.Component) map[string]any {
 	return map[string]any{
 		"componentId":                     component.ID,
 		"componentName":                   component.Name,
@@ -236,7 +234,8 @@ func fakeComponentJSON(component client.Component) map[string]any {
 	}
 }
 
-func testProviderConfig(fake *fakeVEWServer) string {
+// ProviderConfig configures a provider to use this fake VEW server.
+func (f *VEWServer) ProviderConfig() string {
 	return fmt.Sprintf(`
 provider "vew" {
   api_url       = %q
@@ -244,11 +243,5 @@ provider "vew" {
   client_id     = %q
   client_secret = %q
 }
-`, fake.server.URL, fake.server.URL+"/oauth/token", testClientID, testClientSecret)
-}
-
-func testProtoV6ProviderFactories() map[string]func() (tfprotov6.ProviderServer, error) {
-	return map[string]func() (tfprotov6.ProviderServer, error){
-		"vew": providerserver.NewProtocol6WithError(New("test")()),
-	}
+`, f.server.URL, f.server.URL+"/oauth/token", testClientID, testClientSecret)
 }

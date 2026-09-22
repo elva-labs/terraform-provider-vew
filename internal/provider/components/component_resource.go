@@ -1,4 +1,4 @@
-package provider
+package components
 
 import (
 	"context"
@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elva-labs/terraform-provider-vew/internal/client"
+	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew"
+	vewcomponents "github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -21,7 +23,7 @@ import (
 
 // componentResource implements the VEW component resource schema and provider wiring.
 type componentResource struct {
-	client client.ComponentAPI
+	client vewcomponents.API
 }
 
 type componentModel struct {
@@ -84,15 +86,15 @@ func (r *componentResource) Configure(_ context.Context, request resource.Config
 	if request.ProviderData == nil {
 		return
 	}
-	api, ok := request.ProviderData.(client.ComponentAPI)
+	data, ok := request.ProviderData.(providerdata.Data)
 	if !ok {
 		response.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected provider data to implement client.ComponentAPI.",
+			"Expected provider data to be providerdata.Data.",
 		)
 		return
 	}
-	r.client = api
+	r.client = data.Components
 }
 
 func (r *componentResource) ImportState(ctx context.Context, request resource.ImportStateRequest, response *resource.ImportStateResponse) {
@@ -155,7 +157,7 @@ func setProvisionalComponentState(model *componentModel, componentID string) {
 
 func componentAPIDiagnostic(operation string, err error) string {
 	message := fmt.Sprintf("VEW API %s failed", operation)
-	var apiError *client.APIError
+	var apiError *vew.APIError
 	if !errors.As(err, &apiError) {
 		return message
 	}
@@ -207,7 +209,7 @@ func (r *componentResource) Delete(ctx context.Context, request resource.DeleteR
 
 func (r *componentResource) readComponent(ctx context.Context, state *componentModel, terraformState *tfsdk.State, diagnostics *diag.Diagnostics) {
 	component, err := r.client.GetComponent(ctx, state.ProjectID.ValueString(), state.ID.ValueString())
-	if client.IsNotFound(err) {
+	if vew.IsNotFound(err) {
 		terraformState.RemoveResource(ctx)
 		return
 	}
@@ -235,14 +237,14 @@ func parseComponentImportID(value string) (projectID, componentID string, err er
 	return parts[0], parts[1], nil
 }
 
-func createInput(ctx context.Context, model componentModel) (client.CreateComponentInput, diag.Diagnostics) {
+func createInput(ctx context.Context, model componentModel) (vewcomponents.CreateComponentInput, diag.Diagnostics) {
 	architectures, diagnostics := setStrings(ctx, model.SupportedArchitectures, "supported_architectures")
 	osVersions, osDiagnostics := setStrings(ctx, model.SupportedOSVersions, "supported_os_versions")
 	diagnostics.Append(osDiagnostics...)
 	if diagnostics.HasError() {
-		return client.CreateComponentInput{}, diagnostics
+		return vewcomponents.CreateComponentInput{}, diagnostics
 	}
-	return client.CreateComponentInput{
+	return vewcomponents.CreateComponentInput{
 		Name:                   model.Name.ValueString(),
 		Description:            model.Description.ValueString(),
 		Platform:               model.Platform.ValueString(),
@@ -251,11 +253,11 @@ func createInput(ctx context.Context, model componentModel) (client.CreateCompon
 	}, diagnostics
 }
 
-func updateInput(model componentModel) client.UpdateComponentInput {
-	return client.UpdateComponentInput{Description: model.Description.ValueString()}
+func updateInput(model componentModel) vewcomponents.UpdateComponentInput {
+	return vewcomponents.UpdateComponentInput{Description: model.Description.ValueString()}
 }
 
-func setComponentState(ctx context.Context, model *componentModel, component client.Component) diag.Diagnostics {
+func setComponentState(ctx context.Context, model *componentModel, component vewcomponents.Component) diag.Diagnostics {
 	var diagnostics diag.Diagnostics
 	model.ID = types.StringValue(component.ID)
 	model.Name = types.StringValue(component.Name)

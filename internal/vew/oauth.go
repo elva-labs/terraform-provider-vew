@@ -1,4 +1,4 @@
-package client
+package vew
 
 import (
 	"bytes"
@@ -27,16 +27,13 @@ type TokenSource interface {
 
 // OAuthTokenSource implements the OAuth 2.0 client-credentials grant.
 type OAuthTokenSource struct {
-	tokenURL     string
-	clientID     string
-	clientSecret string
-	httpClient   *http.Client
-	now          func() time.Time
-
-	mu       sync.Mutex
-	token    string
-	tokenExp time.Time
-	flight   *oauthRefresh
+	tokenURL, clientID, clientSecret string
+	httpClient                       *http.Client
+	now                              func() time.Time
+	mu                               sync.Mutex
+	token                            string
+	tokenExp                         time.Time
+	flight                           *oauthRefresh
 }
 
 // NewOAuthTokenSource creates a token source for an absolute HTTP(S) token URL.
@@ -54,28 +51,19 @@ func NewOAuthTokenSource(tokenURL, clientID, clientSecret string, httpClient *ht
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &OAuthTokenSource{
-		tokenURL:     tokenURL,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		httpClient:   httpClient,
-		now:          time.Now,
-	}, nil
+	return &OAuthTokenSource{tokenURL: tokenURL, clientID: clientID, clientSecret: clientSecret, httpClient: httpClient, now: time.Now}, nil
 }
 
 type oauthTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int64  `json:"expires_in"`
 }
-
 type oauthRefresh struct {
 	done  chan struct{}
 	token string
 	err   error
 }
 
-// Token returns a cached token when it has more than 30 seconds remaining;
-// otherwise it obtains and caches a fresh token.
 func (s *OAuthTokenSource) Token(ctx context.Context, forceRefresh bool) (string, error) {
 	s.mu.Lock()
 	if !forceRefresh && s.token != "" && s.tokenExp.Sub(s.now()) > expirySkew {
@@ -96,26 +84,18 @@ func (s *OAuthTokenSource) Token(ctx context.Context, forceRefresh bool) (string
 	flight := &oauthRefresh{done: make(chan struct{})}
 	s.flight = flight
 	s.mu.Unlock()
-
 	token, expiry, err := s.refresh(ctx)
 	s.mu.Lock()
 	if err == nil {
-		s.token = token
-		s.tokenExp = expiry
+		s.token, s.tokenExp = token, expiry
 	}
-	flight.token = token
-	flight.err = err
-	s.flight = nil
+	flight.token, flight.err, s.flight = token, err, nil
 	close(flight.done)
 	s.mu.Unlock()
 	return token, err
 }
-
 func (s *OAuthTokenSource) refresh(ctx context.Context) (string, time.Time, error) {
-	form := url.Values{
-		"grant_type": {"client_credentials"},
-		"scope":      {oauthScope},
-	}
+	form := url.Values{"grant_type": {"client_credentials"}, "scope": {oauthScope}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", time.Time{}, errors.New("oauth token request could not be created")
@@ -127,7 +107,6 @@ func (s *OAuthTokenSource) refresh(ctx context.Context) (string, time.Time, erro
 		return "", time.Time{}, errors.New("oauth token request failed")
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return "", time.Time{}, fmt.Errorf("oauth token endpoint returned status %d", resp.StatusCode)
 	}

@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elva-labs/terraform-provider-vew/internal/client"
+	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -71,7 +72,7 @@ func TestProviderConfig(t *testing.T) {
 	t.Run("explicit values", func(t *testing.T) {
 		got, diags := resolveProviderConfig(base, func(string) (string, bool) { return "", false })
 		assertNoDiagnostics(t, diags)
-		want := client.Config{APIURL: "https://configured.example/api", TokenURL: "https://configured.example/token", ClientID: "configured-client", ClientSecret: secret}
+		want := vew.Config{APIURL: "https://configured.example/api", TokenURL: "https://configured.example/token", ClientID: "configured-client", ClientSecret: secret}
 		if got != want {
 			t.Fatalf("expected %#v, got %#v", want, got)
 		}
@@ -148,7 +149,7 @@ func TestProviderConfig(t *testing.T) {
 	})
 }
 
-func TestProviderConfigureSetsComponentAPI(t *testing.T) {
+func TestProviderConfigureSetsProviderData(t *testing.T) {
 	t.Parallel()
 
 	p := New("test")()
@@ -165,8 +166,12 @@ func TestProviderConfigureSetsComponentAPI(t *testing.T) {
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
 	assertNoDiagnostics(t, response.Diagnostics)
-	if _, ok := response.ResourceData.(client.ComponentAPI); !ok {
-		t.Fatalf("expected ResourceData to contain client.ComponentAPI, got %T", response.ResourceData)
+	data, ok := response.ResourceData.(providerdata.Data)
+	if !ok || data.Components == nil {
+		t.Fatalf("expected ResourceData to contain providerdata.Data with components API, got %T", response.ResourceData)
+	}
+	if _, ok := response.DataSourceData.(providerdata.Data); !ok {
+		t.Fatalf("expected DataSourceData to contain providerdata.Data, got %T", response.DataSourceData)
 	}
 }
 
