@@ -135,6 +135,29 @@ func TestTransportHonorsHTTPDateRetryAfter(t *testing.T) {
 	}
 }
 
+func TestRetryAfterReturnsDeltaSeconds(t *testing.T) {
+	if got := RetryAfter(http.Header{"Retry-After": []string{"4"}}, time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)); got != 4*time.Second {
+		t.Fatalf("RetryAfter = %v, want 4s", got)
+	}
+}
+
+func TestRetryAfterReturnsHTTPDateDelay(t *testing.T) {
+	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
+	header := http.Header{"Retry-After": []string{now.Add(7 * time.Second).Format(http.TimeFormat)}}
+	if got := RetryAfter(header, now); got != 7*time.Second {
+		t.Fatalf("RetryAfter = %v, want 7s", got)
+	}
+}
+
+func TestRetryAfterReturnsZeroForAbsentMalformedAndPastValues(t *testing.T) {
+	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
+	for _, header := range []http.Header{nil, {"Retry-After": []string{"invalid"}}, {"Retry-After": []string{now.Add(-time.Second).Format(http.TimeFormat)}}} {
+		if got := RetryAfter(header, now); got != 0 {
+			t.Fatalf("RetryAfter(%v) = %v, want 0", header, got)
+		}
+	}
+}
+
 func TestTransportRedactsBearerTokenFromProblem(t *testing.T) {
 	const token = "access-token-value"
 	transport := testTransport(t, "https://vew.example", &http.Client{Transport: transportRoundTripFunc(func(request *http.Request) (*http.Response, error) {

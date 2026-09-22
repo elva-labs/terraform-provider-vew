@@ -207,6 +207,19 @@ func retryDelay(resp *response, attempt int) time.Duration {
 	}
 	return base + time.Duration(rand.Float64()*0.25*float64(base))
 }
+
+// RetryAfter returns the server-provided delay from a Retry-After header.
+// It accepts delta-seconds and HTTP dates, returning zero when no future delay
+// was supplied. It is intentionally separate from retryDelay so asynchronous
+// domain actions can hand the server's polling advice to a waiter.
+func RetryAfter(header http.Header, now time.Time) time.Duration {
+	delay, ok := parseRetryAfter(header.Get("Retry-After"), now)
+	if !ok {
+		return 0
+	}
+	return delay
+}
+
 func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds >= 0 {
 		return time.Duration(seconds) * time.Second, true
