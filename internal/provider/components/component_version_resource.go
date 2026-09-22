@@ -2,7 +2,10 @@ package components
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -295,18 +298,323 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 	}
 }
 
-func (r *componentVersionResource) Create(_ context.Context, _ resource.CreateRequest, response *resource.CreateResponse) {
-	response.Diagnostics.AddError("Component version create not implemented", "The component version lifecycle will be available in a subsequent provider release.")
+func (r *componentVersionResource) Create(ctx context.Context, request resource.CreateRequest, response *resource.CreateResponse) {
+	var model componentVersionModel
+	response.Diagnostics.Append(request.Plan.Get(ctx, &model)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	input, diagnostics := versionMutableInput(ctx, model)
+	response.Diagnostics.Append(diagnostics...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	action, err := r.client.CreateComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), vewcomponents.CreateComponentVersionInput{
+		Description: input.Description, Definition: input.Definition, Dependencies: input.Dependencies,
+		ReleaseType: model.ReleaseType.ValueString(), SoftwareVendor: input.SoftwareVendor, SoftwareVersion: input.SoftwareVersion,
+		LicenseDashboard: input.LicenseDashboard, Notes: input.Notes,
+	})
+	if err != nil {
+		addVersionError(&response.Diagnostics, "create", err)
+		return
+	}
+	model.ID = types.StringValue(action.ID)
+	model.Status = types.StringValue("CREATING")
+	model.Name, model.CreatedAt, model.CreatedBy, model.UpdatedAt, model.UpdatedBy = types.StringNull(), types.StringNull(), types.StringNull(), types.StringNull(), types.StringNull()
+	// A cancellation must not prevent serialization of an accepted remote ID.
+	stateCtx := context.WithoutCancel(ctx)
+	response.Diagnostics.Append(response.State.Set(stateCtx, &model)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	err = r.waitVersion(ctx, &model, operationTimeout(ctx, model.Timeouts, "create"), action.RetryAfter, validatedVersionStatus, false)
+	response.Diagnostics.Append(response.State.Set(stateCtx, &model)...)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "create", err)
+	}
 }
 
-func (r *componentVersionResource) Read(_ context.Context, _ resource.ReadRequest, response *resource.ReadResponse) {
-	response.Diagnostics.AddError("Component version read not implemented", "The component version lifecycle will be available in a subsequent provider release.")
+func versionMutableInput(ctx context.Context, model componentVersionModel) (vewcomponents.UpdateComponentVersionInput, diag.Diagnostics) {
+	var diagnostics diag.Diagnostics
+	definition, err := normalizeDefinition(model.DefinitionJSON.ValueString())
+	if err != nil {
+		diagnostics.AddError("Invalid component version definition", "The definition must be a single JSON object.")
+	}
+	dependencies, d := expandDependencies(ctx, model.Dependencies)
+	diagnostics.Append(d...)
+	return vewcomponents.UpdateComponentVersionInput{
+		Description: model.Description.ValueString(), Definition: definition, Dependencies: dependencies,
+		SoftwareVendor: model.SoftwareVendor.ValueString(), SoftwareVersion: model.SoftwareVersion.ValueString(),
+		LicenseDashboard: model.LicenseDashboard.ValueStringPointer(), Notes: model.Notes.ValueStringPointer(),
+	}, diagnostics
 }
 
-func (r *componentVersionResource) Update(_ context.Context, _ resource.UpdateRequest, response *resource.UpdateResponse) {
-	response.Diagnostics.AddError("Component version update not implemented", "The component version lifecycle will be available in a subsequent provider release.")
+func setVersionState(ctx context.Context, model *componentVersionModel, version vewcomponents.ComponentVersion) error {
+	// Status and identity remain recoverable even when another remote field is invalid.
+	model.ID, model.Status = types.StringValue(version.ID), types.StringValue(version.Status)
+	model.ComponentID = types.StringValue(version.ComponentID)
+	model.Name, model.Description = types.StringValue(version.Name), types.StringValue(version.Description)
+	model.SoftwareVendor, model.SoftwareVersion = types.StringValue(version.SoftwareVendor), types.StringValue(version.SoftwareVersion)
+	model.LicenseDashboard, model.Notes = types.StringPointerValue(version.LicenseDashboard), types.StringPointerValue(version.Notes)
+	model.CreatedAt, model.CreatedBy = types.StringValue(version.CreatedAt), types.StringValue(version.CreatedBy)
+	model.UpdatedAt, model.UpdatedBy = types.StringValue(version.UpdatedAt), types.StringValue(version.UpdatedBy)
+	definition, err := normalizeDefinition(string(version.Definition))
+	if err != nil {
+		return err
+	}
+	previousDefinition, previousErr := normalizeDefinition(model.DefinitionJSON.ValueString())
+	if previousErr != nil || string(previousDefinition) != string(definition) {
+		model.DefinitionJSON = types.StringValue(string(definition))
+	}
+	dependencies := make([]dependencyModel, 0, len(version.Dependencies))
+	for _, dependency := range version.Dependencies {
+		dependencies = append(dependencies, dependencyModel{
+			ComponentID: types.StringValue(dependency.ComponentID), ComponentName: types.StringValue(dependency.ComponentName),
+			VersionID: types.StringValue(dependency.VersionID), VersionName: types.StringValue(dependency.VersionName),
+			Type: types.StringValue(dependency.Type), Order: types.Int64Value(dependency.Order), Position: types.StringPointerValue(dependency.Position),
+		})
+	}
+	sort.SliceStable(dependencies, func(i, j int) bool { return dependencies[i].Order.ValueInt64() < dependencies[j].Order.ValueInt64() })
+	value, diagnostics := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: componentVersionDependencyAttributeTypes}, dependencies)
+	if diagnostics.HasError() {
+		return errors.New("invalid component version dependencies")
+	}
+	previousDependencies, previousDiagnostics := expandDependencies(ctx, model.Dependencies)
+	remoteDependencies, remoteDiagnostics := expandDependencies(ctx, value)
+	if model.Dependencies.IsNull() || model.Dependencies.IsUnknown() || previousDiagnostics.HasError() || remoteDiagnostics.HasError() || !reflect.DeepEqual(previousDependencies, remoteDependencies) {
+		model.Dependencies = value
+	}
+	return nil
 }
 
-func (r *componentVersionResource) Delete(_ context.Context, _ resource.DeleteRequest, response *resource.DeleteResponse) {
-	response.Diagnostics.AddError("Component version delete not implemented", "The component version lifecycle will be available in a subsequent provider release.")
+func (r *componentVersionResource) getVersion(ctx context.Context, model *componentVersionModel) (vewcomponents.ComponentVersion, error) {
+	return r.client.GetComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), model.ID.ValueString())
+}
+
+func (r *componentVersionResource) waitVersion(ctx context.Context, model *componentVersionModel, timeout, delay time.Duration, evaluate vew.StatusEvaluator, missingIsRetired bool) error {
+	// Retain the last successfully read representation even if a later poll fails.
+	definition, dependencies := model.DefinitionJSON, model.Dependencies
+	return r.waiter.Until(ctx, timeout, delay, func(ctx context.Context) (vew.PollResult, error) {
+		version, err := r.getVersion(ctx, model)
+		if missingIsRetired && vew.IsNotFound(err) {
+			model.Status = types.StringValue("RETIRED")
+			return vew.PollResult{Status: "RETIRED"}, nil
+		}
+		if err != nil {
+			return vew.PollResult{}, err
+		}
+		model.DefinitionJSON, model.Dependencies = definition, dependencies
+		if err := setVersionState(context.WithoutCancel(ctx), model, version); err != nil {
+			return vew.PollResult{}, err
+		}
+		return vew.PollResult{Status: version.Status}, nil
+	}, evaluate)
+}
+
+func pendingVersionStatus(status string) bool {
+	return status == "CREATING" || status == "CREATED" || status == "TESTING" || status == "UPDATING"
+}
+
+func validatedVersionStatus(status string) (bool, error) {
+	if pendingVersionStatus(status) {
+		return false, nil
+	}
+	switch status {
+	case "VALIDATED":
+		return true, nil
+	case "FAILED", "RELEASED", "RETIRED":
+		return false, &vew.TerminalStatusError{Status: status}
+	default:
+		return false, errors.New("unrecognized component version status")
+	}
+}
+
+func addVersionError(diagnostics *diag.Diagnostics, operation string, err error) {
+	message := "VEW component version " + operation + " failed. Refresh state and retry the operation."
+	var terminal *vew.TerminalStatusError
+	var timeout *vew.TimeoutError
+	var api *vew.APIError
+	switch {
+	case errors.As(err, &terminal):
+		// Only statuses from the explicit state machine enter this error type.
+		message = "VEW component version reached " + terminal.Status + ". Refresh state and retry the operation."
+	case errors.As(err, &timeout):
+		message = "Timed out waiting for VEW component version " + operation + ". The latest recoverable state has been retained."
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		message = "VEW component version " + operation + " was cancelled. The latest recoverable state has been retained."
+	case errors.As(err, &api):
+		message = fmt.Sprintf("VEW component version %s failed (HTTP status %d).", operation, api.Status)
+	}
+	diagnostics.AddError("Unable to "+operation+" VEW component version", message)
+}
+
+func (r *componentVersionResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
+	var model componentVersionModel
+	response.Diagnostics.Append(request.State.Get(ctx, &model)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	version, err := r.getVersion(ctx, &model)
+	if vew.IsNotFound(err) || (err == nil && version.Status == "RETIRED") {
+		response.State.RemoveResource(ctx)
+		return
+	}
+	if err != nil {
+		addVersionError(&response.Diagnostics, "read", err)
+		return
+	}
+	err = setVersionState(ctx, &model, version)
+	response.Diagnostics.Append(response.State.Set(context.WithoutCancel(ctx), &model)...)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "read", err)
+	}
+}
+
+func (r *componentVersionResource) Update(ctx context.Context, request resource.UpdateRequest, response *resource.UpdateResponse) {
+	var model, plan componentVersionModel
+	response.Diagnostics.Append(request.State.Get(ctx, &model)...)
+	response.Diagnostics.Append(request.Plan.Get(ctx, &plan)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	input, diagnostics := versionMutableInput(ctx, plan)
+	response.Diagnostics.Append(diagnostics...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	adopting := (model.ReleaseType.IsNull() || model.ReleaseType.IsUnknown()) && !plan.ReleaseType.IsNull() && !plan.ReleaseType.IsUnknown() && equivalentVersionConfiguration(ctx, model, plan)
+	model.ReleaseType, model.Timeouts = plan.ReleaseType, plan.Timeouts
+	stateCtx := context.WithoutCancel(ctx)
+	timeout := operationTimeout(ctx, plan.Timeouts, "update")
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// Always save the latest observation before reporting an operation failure.
+	defer func() { response.Diagnostics.Append(response.State.Set(stateCtx, &model)...) }()
+	version, err := r.getVersion(ctx, &model)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "update", err)
+		return
+	}
+	if err = setVersionState(stateCtx, &model, version); err != nil {
+		addVersionError(&response.Diagnostics, "update", err)
+		return
+	}
+	if pendingVersionStatus(model.Status.ValueString()) {
+		if err = r.waitVersion(ctx, &model, timeout, 0, validatedVersionStatus, false); err != nil {
+			addVersionError(&response.Diagnostics, "update", err)
+			return
+		}
+	}
+	if adopting && equivalentVersionConfiguration(ctx, model, plan) {
+		model.DefinitionJSON, model.Dependencies = plan.DefinitionJSON, plan.Dependencies
+		return
+	}
+	if model.Status.ValueString() != "VALIDATED" && model.Status.ValueString() != "FAILED" {
+		addVersionError(&response.Diagnostics, "update", errors.New("version cannot be updated in its current status"))
+		return
+	}
+	action, err := r.client.UpdateComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), model.ID.ValueString(), input)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "update", err)
+		return
+	}
+	model.DefinitionJSON, model.Dependencies = plan.DefinitionJSON, plan.Dependencies
+	err = r.waitVersion(ctx, &model, timeout, action.RetryAfter, validatedVersionStatus, false)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "update", err)
+	}
+}
+
+func equivalentVersionConfiguration(ctx context.Context, left, right componentVersionModel) bool {
+	leftInput, leftDiagnostics := versionMutableInput(ctx, left)
+	rightInput, rightDiagnostics := versionMutableInput(ctx, right)
+	return !leftDiagnostics.HasError() && !rightDiagnostics.HasError() && reflect.DeepEqual(leftInput, rightInput)
+}
+
+func (r *componentVersionResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
+	var model componentVersionModel
+	response.Diagnostics.Append(request.State.Get(ctx, &model)...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	stateCtx := context.WithoutCancel(ctx)
+	timeout := operationTimeout(ctx, model.Timeouts, "delete")
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	removed := false
+	defer func() {
+		if removed {
+			response.State.RemoveResource(stateCtx)
+		} else {
+			response.Diagnostics.Append(response.State.Set(stateCtx, &model)...)
+		}
+	}()
+	version, err := r.getVersion(ctx, &model)
+	if vew.IsNotFound(err) || (err == nil && version.Status == "RETIRED") {
+		removed = true
+		return
+	}
+	if err != nil {
+		addVersionError(&response.Diagnostics, "delete", err)
+		return
+	}
+	if err = setVersionState(stateCtx, &model, version); err != nil {
+		addVersionError(&response.Diagnostics, "delete", err)
+		return
+	}
+	if pendingVersionStatus(model.Status.ValueString()) {
+		if err = r.waitVersion(ctx, &model, timeout, 0, deletableVersionStatus, true); err != nil {
+			addVersionError(&response.Diagnostics, "delete", err)
+			return
+		}
+	}
+	if model.Status.ValueString() == "RETIRED" {
+		removed = true
+		return
+	}
+	if _, err = deletableVersionStatus(model.Status.ValueString()); err != nil {
+		addVersionError(&response.Diagnostics, "delete", err)
+		return
+	}
+	action, err := r.client.RetireComponentVersion(ctx, model.ProjectID.ValueString(), model.ComponentID.ValueString(), model.ID.ValueString())
+	if vew.IsNotFound(err) {
+		removed = true
+		return
+	}
+	if err != nil {
+		addVersionError(&response.Diagnostics, "delete", err)
+		return
+	}
+	err = r.waitVersion(ctx, &model, timeout, action.RetryAfter, retiredVersionStatus, true)
+	if err != nil {
+		addVersionError(&response.Diagnostics, "delete", err)
+		return
+	}
+	removed = true
+}
+
+func deletableVersionStatus(status string) (bool, error) {
+	if pendingVersionStatus(status) {
+		return false, nil
+	}
+	switch status {
+	case "VALIDATED", "FAILED", "RELEASED", "RETIRED":
+		return true, nil
+	default:
+		return false, errors.New("unrecognized component version status")
+	}
+}
+
+func retiredVersionStatus(status string) (bool, error) {
+	if pendingVersionStatus(status) || status == "VALIDATED" || status == "RELEASED" {
+		return false, nil
+	}
+	switch status {
+	case "RETIRED":
+		return true, nil
+	case "FAILED":
+		return false, &vew.TerminalStatusError{Status: status}
+	default:
+		return false, errors.New("unrecognized component version status")
+	}
 }

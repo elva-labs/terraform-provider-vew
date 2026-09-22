@@ -2,10 +2,13 @@ package components
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/elva-labs/terraform-provider-vew/internal/provider/testhelpers"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	vewcomponents "github.com/elva-labs/terraform-provider-vew/internal/vew/components"
@@ -18,6 +21,178 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+// immediateVersionWaiter keeps the real HTTP/domain/resource boundary while
+// replacing only the slow polling clock. Shared waiter timing has its own tests.
+type immediateVersionWaiter struct {
+	timeout, delay time.Duration
+	limit          int
+	afterRead      func()
+}
+
+func (w *immediateVersionWaiter) Until(ctx context.Context, timeout, delay time.Duration, read vew.StatusReader, evaluate vew.StatusEvaluator) error {
+	w.timeout, w.delay = timeout, delay
+	for n := 0; n < 20; n++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result, err := read(ctx)
+		if err != nil {
+			return err
+		}
+		if w.afterRead != nil {
+			w.afterRead()
+		}
+		if done, err := evaluate(result.Status); done || err != nil {
+			return err
+		}
+		if w.limit > 0 && n+1 >= w.limit {
+			return &vew.TimeoutError{LastStatus: result.Status}
+		}
+	}
+	return &vew.TimeoutError{}
+}
+
+func versionFixture(status string) vewcomponents.ComponentVersion {
+	return vewcomponents.ComponentVersion{ID: "version", ComponentID: "component", Description: "description", Name: "1.0.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, SoftwareVendor: "vendor", SoftwareVersion: "1.0", Status: status, CreatedAt: "2026-09-22T00:00:00Z", CreatedBy: "creator", UpdatedAt: "2026-09-22T00:00:00Z", UpdatedBy: "updater"}
+}
+
+func versionHarness(t *testing.T, statuses ...string) (*componentVersionResource, *testhelpers.VEWServer, *immediateVersionWaiter) {
+	t.Helper()
+	fake := testhelpers.NewVEWServer(t)
+	responses := make([]testhelpers.VersionResponse, len(statuses))
+	for i, status := range statuses {
+		responses[i] = testhelpers.VersionResponse{Version: versionFixture(status)}
+	}
+	fake.QueueVersionReads("project", "component", "version", responses...)
+	w := &immediateVersionWaiter{}
+	return &componentVersionResource{client: fake.ComponentVersionAPI(t), waiter: w}, fake, w
+}
+
+func createVersion(t *testing.T, ctx context.Context, r *componentVersionResource, model componentVersionModel) resource.CreateResponse {
+	t.Helper()
+	s := componentVersionState(t, r, model)
+	response := resource.CreateResponse{State: tfsdk.State{Schema: s.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: tfsdk.Plan{Raw: s.Raw, Schema: s.Schema}}, &response)
+	return response
+}
+
+func decodeVersionState(t *testing.T, state tfsdk.State) componentVersionModel {
+	t.Helper()
+	var model componentVersionModel
+	if d := state.Get(context.Background(), &model); d.HasError() {
+		t.Fatalf("decode state: %v", d)
+	}
+	return model
+}
+
+func assertVersionMethods(t *testing.T, fake *testhelpers.VEWServer, want ...string) {
+	t.Helper()
+	var got []string
+	for _, request := range fake.VersionRequests() {
+		got = append(got, request.Method)
+		path := "/projects/project/components/component/versions/version"
+		if request.Method == "POST" {
+			path = "/projects/project/components/component/versions"
+		}
+		if request.Path != path {
+			t.Errorf("path = %q, want %q", request.Path, path)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %v, want %v", got, want)
+	}
+}
+
+func TestComponentVersionCreateWaitsThroughCreatedAndTestingToValidated(t *testing.T) {
+	r, fake, w := versionHarness(t, "CREATING", "CREATED", "TESTING", "VALIDATED")
+	fake.SetVersionRetryAfter("3")
+	model := validComponentVersionModel(t)
+	model.ID = types.StringUnknown()
+	model.Timeouts = timeoutsValue(t, "2m", "", "")
+	response := createVersion(t, context.Background(), r, model)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	got := decodeVersionState(t, response.State)
+	model.ID = types.StringValue("version")
+	if !response.State.Raw.Equal(componentVersionState(t, r, model).Raw) {
+		t.Fatalf("state = %#v, want %#v", got, model)
+	}
+	assertVersionMethods(t, fake, "POST", "GET", "GET", "GET", "GET")
+	if w.timeout != 2*time.Minute || w.delay != 3*time.Second {
+		t.Fatalf("wait timeout/delay = %v/%v", w.timeout, w.delay)
+	}
+	if fake.VersionRequests()[0].IdempotencyKey == "" {
+		t.Fatal("missing idempotency key")
+	}
+}
+
+func TestComponentVersionCreateUsesNormalizedDefinitionAndSortedDependencies(t *testing.T) {
+	r, fake, _ := versionHarness(t, "VALIDATED")
+	model := validComponentVersionModel(t)
+	model.DefinitionJSON = types.StringValue(`{"phases":[{"steps":[{"name":"install"}]}]}`)
+	model.Dependencies = dependencyList(
+		dependencyModel{ComponentID: types.StringValue("b"), ComponentName: types.StringValue("B"), VersionID: types.StringValue("vb"), VersionName: types.StringValue("2"), Type: types.StringNull(), Order: types.Int64Value(2), Position: types.StringNull()},
+		dependencyModel{ComponentID: types.StringValue("a"), ComponentName: types.StringValue("A"), VersionID: types.StringValue("va"), VersionName: types.StringValue("1"), Type: types.StringValue("MAIN"), Order: types.Int64Value(1), Position: types.StringNull()},
+	)
+	response := createVersion(t, context.Background(), r, model)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	var input vewcomponents.CreateComponentVersionInput
+	if err := json.Unmarshal(fake.VersionRequests()[0].Body, &input); err != nil {
+		t.Fatal(err)
+	}
+	if string(input.Definition) != `{"phases":[{"steps":[{"maxAttempts":1,"name":"install","onFailure":"Abort","timeoutSeconds":7200}]}]}` || len(input.Dependencies) != 2 || input.Dependencies[0].ComponentID != "a" || input.Dependencies[1].Type != "HELPER" || input.ReleaseType != "MAJOR" {
+		t.Fatalf("unexpected create payload: %#v", input)
+	}
+}
+
+func TestComponentVersionCreatePreservesProvisionalStateOnFailedStatus(t *testing.T) {
+	for _, status := range []string{"FAILED", "RELEASED", "RETIRED", "definition_json secret"} {
+		t.Run(status, func(t *testing.T) {
+			r, _, _ := versionHarness(t, "CREATING", status)
+			response := createVersion(t, context.Background(), r, validComponentVersionModel(t))
+			assertRecoverableVersion(t, response.State, response.Diagnostics, status)
+		})
+	}
+}
+
+func assertRecoverableVersion(t *testing.T, state tfsdk.State, diagnostics diag.Diagnostics, status string) {
+	t.Helper()
+	if !diagnostics.HasError() || diagnosticsContain(diagnostics, "definition_json") || diagnosticsContain(diagnostics, "secret") {
+		t.Fatalf("unsafe or missing diagnostics: %v", diagnostics)
+	}
+	got := decodeVersionState(t, state)
+	if got.ID.ValueString() != "version" || got.ProjectID.ValueString() != "project" || got.ComponentID.ValueString() != "component" || got.ReleaseType.ValueString() != "MAJOR" || got.Status.ValueString() != status {
+		t.Fatalf("lost recoverable state: %#v", got)
+	}
+}
+
+func TestComponentVersionCreatePreservesProvisionalStateOnTimeout(t *testing.T) {
+	r, _, w := versionHarness(t, "TESTING")
+	w.limit = 1
+	response := createVersion(t, context.Background(), r, validComponentVersionModel(t))
+	assertRecoverableVersion(t, response.State, response.Diagnostics, "TESTING")
+}
+
+func TestComponentVersionCreatePreservesStateOnCancellationAndReadError(t *testing.T) {
+	t.Run("cancellation", func(t *testing.T) {
+		r, _, w := versionHarness(t, "TESTING")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		w.afterRead = cancel
+		response := createVersion(t, ctx, r, validComponentVersionModel(t))
+		assertRecoverableVersion(t, response.State, response.Diagnostics, "TESTING")
+	})
+	t.Run("first read fails", func(t *testing.T) {
+		r, fake, _ := versionHarness(t)
+		fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{StatusCode: 400, Detail: "definition_json secret"})
+		response := createVersion(t, context.Background(), r, validComponentVersionModel(t))
+		assertRecoverableVersion(t, response.State, response.Diagnostics, "CREATING")
+	})
+}
+
 func TestComponentVersionResourceMetadata(t *testing.T) {
 	r := NewComponentVersionResource()
 	var response resource.MetadataResponse
@@ -25,6 +200,84 @@ func TestComponentVersionResourceMetadata(t *testing.T) {
 	if response.TypeName != "vew_component_version" {
 		t.Fatalf("type name = %q, want %q", response.TypeName, "vew_component_version")
 	}
+}
+
+func readVersion(t *testing.T, r *componentVersionResource, model componentVersionModel) resource.ReadResponse {
+	t.Helper()
+	state := componentVersionState(t, r, model)
+	response := resource.ReadResponse{State: state}
+	r.Read(context.Background(), resource.ReadRequest{State: state}, &response)
+	return response
+}
+
+func TestComponentVersionReadRefreshesRemoteFieldsAndCanonicalDefinition(t *testing.T) {
+	r, fake, _ := versionHarness(t)
+	remote := versionFixture("TESTING")
+	remote.Description, remote.SoftwareVendor, remote.SoftwareVersion = "changed", "new vendor", "2.0"
+	remote.Name, remote.CreatedBy, remote.UpdatedBy = "2.0.0", "new creator", "new updater"
+	remote.CreatedAt, remote.UpdatedAt = "2026-09-21T00:00:00Z", "2026-09-23T00:00:00Z"
+	license, notes, position := "dashboard", "notes", "APPEND"
+	remote.LicenseDashboard, remote.Notes = &license, &notes
+	remote.Definition = json.RawMessage(`{ "phases": [ { "steps": [ {} ] } ] }`)
+	remote.Dependencies = []vewcomponents.Dependency{
+		{ComponentID: "b", ComponentName: "B", VersionID: "vb", VersionName: "2", Type: "HELPER", Order: 2},
+		{ComponentID: "a", ComponentName: "A", VersionID: "va", VersionName: "1", Type: "MAIN", Order: 1, Position: &position},
+	}
+	fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{Version: remote})
+	model := validComponentVersionModel(t)
+	model.Timeouts = timeoutsValue(t, "2m", "3m", "4m")
+	response := readVersion(t, r, model)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	got := decodeVersionState(t, response.State)
+	want := model
+	want.Description, want.SoftwareVendor, want.SoftwareVersion = types.StringValue("changed"), types.StringValue("new vendor"), types.StringValue("2.0")
+	want.Name, want.CreatedBy, want.UpdatedBy = types.StringValue("2.0.0"), types.StringValue("new creator"), types.StringValue("new updater")
+	want.CreatedAt, want.UpdatedAt = types.StringValue("2026-09-21T00:00:00Z"), types.StringValue("2026-09-23T00:00:00Z")
+	want.Status, want.LicenseDashboard, want.Notes = types.StringValue("TESTING"), types.StringValue("dashboard"), types.StringValue("notes")
+	want.DefinitionJSON = types.StringValue(`{"phases":[{"steps":[{"maxAttempts":1,"onFailure":"Abort","timeoutSeconds":7200}]}]}`)
+	want.Dependencies = dependencyList(
+		dependencyModel{ComponentID: types.StringValue("a"), ComponentName: types.StringValue("A"), VersionID: types.StringValue("va"), VersionName: types.StringValue("1"), Type: types.StringValue("MAIN"), Order: types.Int64Value(1), Position: types.StringValue("APPEND")},
+		dependencyModel{ComponentID: types.StringValue("b"), ComponentName: types.StringValue("B"), VersionID: types.StringValue("vb"), VersionName: types.StringValue("2"), Type: types.StringValue("HELPER"), Order: types.Int64Value(2), Position: types.StringNull()},
+	)
+	if !response.State.Raw.Equal(componentVersionState(t, r, want).Raw) {
+		t.Fatalf("state = %#v, want %#v", got, want)
+	}
+	assertVersionMethods(t, fake, "GET")
+}
+
+func TestComponentVersionReadPreservesConfiguredReleaseType(t *testing.T) {
+	for _, release := range []types.String{types.StringValue("PATCH"), types.StringNull()} {
+		r, _, _ := versionHarness(t, "VALIDATED")
+		model := validComponentVersionModel(t)
+		model.ReleaseType = release
+		response := readVersion(t, r, model)
+		if response.Diagnostics.HasError() {
+			t.Fatal(response.Diagnostics)
+		}
+		if got := decodeVersionState(t, response.State); !got.ReleaseType.Equal(release) {
+			t.Fatalf("release = %v", got.ReleaseType)
+		}
+	}
+}
+
+func TestComponentVersionReadRemovesStateOnNotFound(t *testing.T) {
+	r, fake, _ := versionHarness(t)
+	response := readVersion(t, r, validComponentVersionModel(t))
+	if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+		t.Fatalf("state/diagnostics = %v/%v", response.State.Raw, response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET")
+}
+
+func TestComponentVersionReadRemovesStateOnRetired(t *testing.T) {
+	r, fake, _ := versionHarness(t, "RETIRED")
+	response := readVersion(t, r, validComponentVersionModel(t))
+	if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+		t.Fatalf("state/diagnostics = %v/%v", response.State.Raw, response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET")
 }
 
 func TestComponentVersionResourceSchema(t *testing.T) {
@@ -92,6 +345,181 @@ func TestComponentVersionResourceSchema(t *testing.T) {
 			t.Fatalf("timeouts.%s must be optional, got %#v", name, attribute)
 		}
 	}
+}
+
+func updateVersion(t *testing.T, r *componentVersionResource, state, plan componentVersionModel) resource.UpdateResponse {
+	t.Helper()
+	s, p := componentVersionState(t, r, state), componentVersionState(t, r, plan)
+	response := resource.UpdateResponse{State: s}
+	r.Update(context.Background(), resource.UpdateRequest{State: s, Plan: tfsdk.Plan{Raw: p.Raw, Schema: p.Schema}}, &response)
+	return response
+}
+
+func TestComponentVersionUpdateSendsFullMutablePayloadAndWaitsForValidated(t *testing.T) {
+	r, fake, w := versionHarness(t, "VALIDATED", "UPDATING", "CREATED", "TESTING", "VALIDATED")
+	state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+	plan.Description, plan.SoftwareVendor, plan.SoftwareVersion = types.StringValue("changed"), types.StringValue("new vendor"), types.StringValue("2.0")
+	plan.LicenseDashboard, plan.Notes = types.StringValue("dashboard"), types.StringValue("notes")
+	plan.Timeouts = timeoutsValue(t, "", "3m", "")
+	fake.SetVersionRetryAfter("7")
+	response := updateVersion(t, r, state, plan)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET", "PUT", "GET", "GET", "GET", "GET")
+	var payload map[string]any
+	if err := json.Unmarshal(fake.VersionRequests()[1].Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"componentVersionDescription": "changed", "componentVersionDefinition": map[string]any{"phases": []any{}}, "componentVersionDependencies": []any{}, "softwareVendor": "new vendor", "softwareVersion": "2.0", "licenseDashboard": "dashboard", "notes": "notes"}
+	if !reflect.DeepEqual(payload, want) {
+		t.Fatalf("payload = %#v, want %#v", payload, want)
+	}
+	got := decodeVersionState(t, response.State)
+	if got.Status.ValueString() != "VALIDATED" || !got.ReleaseType.Equal(plan.ReleaseType) || !got.Timeouts.Equal(plan.Timeouts) {
+		t.Fatalf("state = %#v", got)
+	}
+	if w.timeout != 3*time.Minute || w.delay != 7*time.Second {
+		t.Fatalf("timeout/delay = %v/%v", w.timeout, w.delay)
+	}
+}
+
+func TestComponentVersionUpdateAdoptsImportedReleaseTypeWithoutPut(t *testing.T) {
+	for _, priorRelease := range []types.String{types.StringNull(), types.StringUnknown()} {
+		r, fake, _ := versionHarness(t, "VALIDATED")
+		state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+		state.ReleaseType = priorRelease
+		plan.ReleaseType = types.StringValue("PATCH")
+		response := updateVersion(t, r, state, plan)
+		if response.Diagnostics.HasError() {
+			t.Fatal(response.Diagnostics)
+		}
+		assertVersionMethods(t, fake, "GET")
+		got := decodeVersionState(t, response.State)
+		if got.ReleaseType.ValueString() != "PATCH" || got.Status.ValueString() != "VALIDATED" {
+			t.Fatalf("state = %#v", got)
+		}
+	}
+}
+
+func TestComponentVersionUpdateWaitsForPendingRemoteOperationBeforePut(t *testing.T) {
+	r, fake, _ := versionHarness(t, "UPDATING", "CREATED", "TESTING", "VALIDATED", "UPDATING", "CREATED", "TESTING", "VALIDATED")
+	state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+	plan.Description = types.StringValue("changed")
+	response := updateVersion(t, r, state, plan)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET", "GET", "GET", "GET", "PUT", "GET", "GET", "GET", "GET")
+}
+
+func TestComponentVersionUpdatePreservesStateOnFailedStatus(t *testing.T) {
+	r, fake, _ := versionHarness(t, "VALIDATED", "UPDATING", "FAILED")
+	state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+	plan.Description = types.StringValue("changed")
+	response := updateVersion(t, r, state, plan)
+	assertRecoverableVersion(t, response.State, response.Diagnostics, "FAILED")
+	assertVersionMethods(t, fake, "GET", "PUT", "GET", "GET")
+}
+
+func TestComponentVersionUpdateRetriesExistingFailedVersion(t *testing.T) {
+	r, fake, _ := versionHarness(t, "FAILED", "UPDATING", "CREATED", "TESTING", "VALIDATED")
+	state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+	state.Status, plan.Description = types.StringValue("FAILED"), types.StringValue("retry")
+	response := updateVersion(t, r, state, plan)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET", "PUT", "GET", "GET", "GET", "GET")
+}
+
+func TestComponentVersionUpdateAdoptionWithMutableChangeStillPuts(t *testing.T) {
+	r, fake, _ := versionHarness(t, "VALIDATED", "VALIDATED")
+	state, plan := validComponentVersionModel(t), validComponentVersionModel(t)
+	state.ReleaseType, plan.Description = types.StringNull(), types.StringValue("changed")
+	response := updateVersion(t, r, state, plan)
+	if response.Diagnostics.HasError() {
+		t.Fatal(response.Diagnostics)
+	}
+	assertVersionMethods(t, fake, "GET", "PUT", "GET")
+}
+
+func deleteVersion(t *testing.T, r *componentVersionResource, model componentVersionModel) resource.DeleteResponse {
+	t.Helper()
+	s := componentVersionState(t, r, model)
+	response := resource.DeleteResponse{State: s}
+	r.Delete(context.Background(), resource.DeleteRequest{State: s}, &response)
+	return response
+}
+
+func TestComponentVersionDeleteWaitsForPendingOperationThenRetires(t *testing.T) {
+	for _, settled := range []string{"VALIDATED", "FAILED", "RELEASED"} {
+		t.Run(settled, func(t *testing.T) {
+			r, fake, _ := versionHarness(t, "UPDATING", "CREATED", "TESTING", settled, "UPDATING", "RETIRED")
+			response := deleteVersion(t, r, validComponentVersionModel(t))
+			if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+				t.Fatalf("delete: %v, state null = %v", response.Diagnostics, response.State.Raw.IsNull())
+			}
+			assertVersionMethods(t, fake, "GET", "GET", "GET", "GET", "DELETE", "GET", "GET")
+		})
+	}
+}
+
+func TestComponentVersionDeleteWaitsUntilRetired(t *testing.T) {
+	for _, status := range []string{"VALIDATED", "FAILED", "RELEASED"} {
+		t.Run(status, func(t *testing.T) {
+			r, fake, w := versionHarness(t, status, "UPDATING", "RETIRED")
+			fake.SetVersionRetryAfter("5")
+			model := validComponentVersionModel(t)
+			model.Timeouts = timeoutsValue(t, "", "", "4m")
+			response := deleteVersion(t, r, model)
+			if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+				t.Fatalf("delete: %v, state null = %v", response.Diagnostics, response.State.Raw.IsNull())
+			}
+			assertVersionMethods(t, fake, "GET", "DELETE", "GET", "GET")
+			if w.timeout != 4*time.Minute || w.delay != 5*time.Second {
+				t.Fatalf("timeout/delay = %v/%v", w.timeout, w.delay)
+			}
+		})
+	}
+}
+
+func TestComponentVersionDeleteTreatsNotFoundAsSuccess(t *testing.T) {
+	for _, stage := range []string{"initial", "pending", "retiring", "already retired"} {
+		t.Run(stage, func(t *testing.T) {
+			r, fake, _ := versionHarness(t)
+			want := []string{"GET"}
+			switch stage {
+			case "pending":
+				fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{Version: versionFixture("UPDATING")}, testhelpers.VersionResponse{StatusCode: 404})
+				want = []string{"GET", "GET"}
+			case "retiring":
+				fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{Version: versionFixture("VALIDATED")}, testhelpers.VersionResponse{StatusCode: 404})
+				want = []string{"GET", "DELETE", "GET"}
+			case "already retired":
+				fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{Version: versionFixture("RETIRED")})
+			}
+			response := deleteVersion(t, r, validComponentVersionModel(t))
+			if response.Diagnostics.HasError() || !response.State.Raw.IsNull() {
+				t.Fatalf("delete: %v, state null = %v", response.Diagnostics, response.State.Raw.IsNull())
+			}
+			assertVersionMethods(t, fake, want...)
+		})
+	}
+}
+
+func TestComponentVersionDeletePreservesStateOnFailedStatus(t *testing.T) {
+	r, fake, _ := versionHarness(t, "VALIDATED", "UPDATING", "FAILED")
+	response := deleteVersion(t, r, validComponentVersionModel(t))
+	assertRecoverableVersion(t, response.State, response.Diagnostics, "FAILED")
+	assertVersionMethods(t, fake, "GET", "DELETE", "GET", "GET")
+}
+
+func TestComponentVersionDeletePreservesStateOnTimeout(t *testing.T) {
+	r, _, w := versionHarness(t, "VALIDATED", "UPDATING")
+	w.limit = 1
+	response := deleteVersion(t, r, validComponentVersionModel(t))
+	assertRecoverableVersion(t, response.State, response.Diagnostics, "UPDATING")
 }
 
 func TestComponentVersionResourceConfigure(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -23,20 +24,116 @@ const (
 type VEWServer struct {
 	t *testing.T
 
-	mu             sync.Mutex
-	server         *httptest.Server
-	component      components.Component
-	archived       bool
-	notFound       bool
-	createCalls    int
-	getCalls       int
-	updateCalls    int
-	archiveCalls   int
-	idempotencyKey string
-	create         components.CreateComponentInput
-	update         components.UpdateComponentInput
-	failGets       int
-	failGetDetail  string
+	mu                 sync.Mutex
+	server             *httptest.Server
+	component          components.Component
+	archived           bool
+	notFound           bool
+	createCalls        int
+	getCalls           int
+	updateCalls        int
+	archiveCalls       int
+	idempotencyKey     string
+	create             components.CreateComponentInput
+	update             components.UpdateComponentInput
+	failGets           int
+	failGetDetail      string
+	versionReads       map[string][]VersionResponse
+	versionRequests    []VersionRequest
+	versionRetryAfter  string
+	versionActionReads map[string][]VersionResponse
+}
+
+// VersionResponse scripts one version GET. The last response is repeated.
+type VersionResponse struct {
+	Version    components.ComponentVersion
+	StatusCode int
+	Detail     string
+}
+
+type VersionRequest struct {
+	Method, Path, IdempotencyKey string
+	Body                         json.RawMessage
+}
+
+func (f *VEWServer) QueueVersionReads(project, component, version string, responses ...VersionResponse) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.versionReads == nil {
+		f.versionReads = make(map[string][]VersionResponse)
+	}
+	f.versionReads["/projects/"+project+"/components/"+component+"/versions/"+version] = responses
+}
+
+func (f *VEWServer) VersionRequests() []VersionRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]VersionRequest(nil), f.versionRequests...)
+}
+
+func (f *VEWServer) SetVersionRetryAfter(value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.versionRetryAfter = value
+}
+
+// QueueVersionActionReads installs a fresh GET sequence when an action is accepted.
+func (f *VEWServer) QueueVersionActionReads(method, project, component, version string, responses ...VersionResponse) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.versionActionReads == nil {
+		f.versionActionReads = make(map[string][]VersionResponse)
+	}
+	f.versionActionReads[method+" /projects/"+project+"/components/"+component+"/versions/"+version] = responses
+}
+
+func (f *VEWServer) ComponentVersionAPI(t *testing.T) components.ComponentVersionAPI {
+	t.Helper()
+	transport, err := vew.NewTransport(vew.Config{APIURL: f.server.URL, TokenURL: f.server.URL + "/oauth/token", ClientID: testClientID, ClientSecret: testClientSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return components.NewClient(transport)
+}
+
+func (f *VEWServer) handleVersion(w http.ResponseWriter, request *http.Request) {
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		f.writeProblem(w, 400, "invalid request")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.versionRequests = append(f.versionRequests, VersionRequest{Method: request.Method, Path: request.URL.Path, Body: body, IdempotencyKey: request.Header.Get("Idempotency-Key")})
+	if request.Method == http.MethodGet {
+		queue := f.versionReads[request.URL.Path]
+		if len(queue) == 0 {
+			f.writeProblem(w, 404, "version not found")
+			return
+		}
+		response := queue[0]
+		if len(queue) > 1 {
+			f.versionReads[request.URL.Path] = queue[1:]
+		}
+		if response.StatusCode >= 400 {
+			f.writeProblem(w, response.StatusCode, response.Detail)
+			return
+		}
+		f.writeJSON(w, 200, map[string]any{"component_version": response.Version, "componentVersionDefinition": response.Version.Definition})
+		return
+	}
+	path := request.URL.Path
+	if request.Method == http.MethodPost {
+		path += "/version"
+	}
+	if responses, ok := f.versionActionReads[request.Method+" "+path]; ok {
+		if f.versionReads == nil {
+			f.versionReads = make(map[string][]VersionResponse)
+		}
+		f.versionReads[path] = append([]VersionResponse(nil), responses...)
+	}
+	w.Header().Set("Retry-After", f.versionRetryAfter)
+	f.writeJSON(w, 202, map[string]string{"componentVersionId": "version"})
 }
 
 // Snapshot exposes observed fake-server behavior to external protocol tests.
@@ -92,6 +189,10 @@ func (f *VEWServer) handle(w http.ResponseWriter, request *http.Request) {
 	}
 	if request.Header.Get("Authorization") != "Bearer "+testAccessToken {
 		f.writeProblem(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if strings.Contains(request.URL.Path, "/versions") {
+		f.handleVersion(w, request)
 		return
 	}
 
