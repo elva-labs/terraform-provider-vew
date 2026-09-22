@@ -276,6 +276,18 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 	if state.Status.IsUnknown() || state.Status.IsNull() || state.Status.ValueString() != "RELEASED" {
 		return
 	}
+	// These local copies are only used to decide replacement. Keep configured
+	// representations in the actual plan when their normalized meanings match.
+	stateDefinition, stateDefinitionErr := normalizeDefinition(state.DefinitionJSON.ValueString())
+	planDefinition, planDefinitionErr := normalizeDefinition(plan.DefinitionJSON.ValueString())
+	if stateDefinitionErr == nil && planDefinitionErr == nil && string(stateDefinition) == string(planDefinition) {
+		plan.DefinitionJSON = state.DefinitionJSON
+	}
+	stateDependencies, stateDependenciesDiagnostics := expandDependencies(ctx, state.Dependencies)
+	planDependencies, planDependenciesDiagnostics := expandDependencies(ctx, plan.Dependencies)
+	if !stateDependenciesDiagnostics.HasError() && !planDependenciesDiagnostics.HasError() && reflect.DeepEqual(stateDependencies, planDependencies) {
+		plan.Dependencies = state.Dependencies
+	}
 	for _, attribute := range []struct {
 		path  path.Path
 		state attr.Value
@@ -403,10 +415,12 @@ func (r *componentVersionResource) waitVersion(ctx context.Context, model *compo
 		if err != nil {
 			return vew.PollResult{}, err
 		}
-		model.DefinitionJSON, model.Dependencies = definition, dependencies
-		if err := setVersionState(context.WithoutCancel(ctx), model, version); err != nil {
+		candidate := *model
+		candidate.DefinitionJSON, candidate.Dependencies = definition, dependencies
+		if err := setVersionState(context.WithoutCancel(ctx), &candidate, version); err != nil {
 			return vew.PollResult{}, err
 		}
+		*model = candidate
 		return vew.PollResult{Status: version.Status}, nil
 	}, evaluate)
 }

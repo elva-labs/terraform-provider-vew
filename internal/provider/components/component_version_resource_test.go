@@ -176,6 +176,41 @@ func TestComponentVersionCreatePreservesProvisionalStateOnTimeout(t *testing.T) 
 	assertRecoverableVersion(t, response.State, response.Diagnostics, "TESTING")
 }
 
+func TestComponentVersionCreatePreservesLastSuccessfulObservationOnMalformedLaterPoll(t *testing.T) {
+	for _, malformed := range []struct {
+		name       string
+		definition json.RawMessage
+	}{
+		{"invalid definition", json.RawMessage(`"definition_json secret"`)},
+		{"missing definition", nil},
+	} {
+		t.Run(malformed.name, func(t *testing.T) {
+			r, fake, _ := versionHarness(t)
+			drift := versionFixture("TESTING")
+			drift.Definition = json.RawMessage(`{"remote":"retained"}`)
+			drift.Dependencies = []vewcomponents.Dependency{{ComponentID: "a", ComponentName: "A", VersionID: "va", VersionName: "1", Type: "HELPER", Order: 1}}
+			drift.Description = "successful observation"
+			invalid := versionFixture("VALIDATED")
+			invalid.Definition = malformed.definition
+			invalid.Description = "incomplete observation"
+			fake.QueueVersionReads("project", "component", "version", testhelpers.VersionResponse{Version: drift}, testhelpers.VersionResponse{Version: invalid})
+			response := createVersion(t, context.Background(), r, validComponentVersionModel(t))
+			if !response.Diagnostics.HasError() || diagnosticsContain(response.Diagnostics, "definition_json") || diagnosticsContain(response.Diagnostics, "secret") {
+				t.Fatalf("unsafe or missing diagnostics: %v", response.Diagnostics)
+			}
+			got := decodeVersionState(t, response.State)
+			want := validComponentVersionModel(t)
+			want.Status, want.Description = types.StringValue("TESTING"), types.StringValue("successful observation")
+			want.DefinitionJSON = types.StringValue(`{"remote":"retained"}`)
+			want.Dependencies = dependencyList(dependencyModel{ComponentID: types.StringValue("a"), ComponentName: types.StringValue("A"), VersionID: types.StringValue("va"), VersionName: types.StringValue("1"), Type: types.StringValue("HELPER"), Order: types.Int64Value(1), Position: types.StringNull()})
+			if !response.State.Raw.Equal(componentVersionState(t, r, want).Raw) {
+				t.Fatalf("lost last successful observation: status=%s, description=%s, definition=%s, dependencies=%s", got.Status, got.Description, got.DefinitionJSON, got.Dependencies)
+			}
+			assertVersionMethods(t, fake, "POST", "GET", "GET")
+		})
+	}
+}
+
 func TestComponentVersionCreatePreservesStateOnCancellationAndReadError(t *testing.T) {
 	t.Run("cancellation", func(t *testing.T) {
 		r, _, w := versionHarness(t, "TESTING")

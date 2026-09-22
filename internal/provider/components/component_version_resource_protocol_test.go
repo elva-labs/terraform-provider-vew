@@ -158,6 +158,52 @@ func TestComponentVersionResourceCreationPlan(t *testing.T) {
 	})
 }
 
+func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfiguration(t *testing.T) {
+	fake := testhelpers.NewVEWServer(t)
+	remote := vewcomponents.ComponentVersion{
+		ID: "version", ComponentID: "cmp-123", Description: "created by provider test", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Status: "RELEASED",
+		Definition: json.RawMessage(`{"phases":[{"steps":[{"maxAttempts":1,"onFailure":"Abort","timeoutSeconds":7200}]}]}`),
+		Dependencies: []vewcomponents.Dependency{
+			{ComponentID: "a", ComponentName: "A", VersionID: "va", VersionName: "1", Type: "HELPER", Order: 1},
+			{ComponentID: "b", ComponentName: "B", VersionID: "vb", VersionName: "2", Type: "HELPER", Order: 2},
+		},
+	}
+	fake.QueueVersionReads("prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	remote.Status = "RETIRED"
+	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	definition := `{ "phases": [ { "steps": [ {} ] } ] }`
+	config := fake.ProviderConfig() + strings.Replace(componentVersionResourceConfig(), `jsonencode({ phases = [] })`, fmt.Sprintf("%q", definition), 1)
+	config = strings.Replace(config, `software_version = "1.0"`, `software_version = "1.0"
+  dependencies = [
+    { component_id = "b", component_name = "B", version_id = "vb", version_name = "2", order = 2 },
+    { component_id = "a", component_name = "A", version_id = "va", version_name = "1", order = 1 }
+  ]`, 1)
+	getOnly := func(*terraform.State) error {
+		for _, request := range fake.VersionRequests() {
+			if request.Method != "GET" {
+				return fmt.Errorf("released adoption issued %s", request.Method)
+			}
+		}
+		return nil
+	}
+	testresource.Test(t, testresource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"vew": providerserver.NewProtocol6WithError(&fastVersionProvider{Provider: rootprovider.New("test")()})},
+		Steps: []testresource.TestStep{
+			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: true},
+			{Config: config, ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "prog-73488/cmp-123/version", ImportStatePersist: true},
+			{Config: config, Check: testresource.ComposeTestCheckFunc(
+				getOnly,
+				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "RELEASED"),
+				testresource.TestCheckResourceAttr("vew_component_version.test", "release_type", "PATCH"),
+				testresource.TestCheckResourceAttr("vew_component_version.test", "definition_json", definition),
+				testresource.TestCheckResourceAttr("vew_component_version.test", "dependencies.0.component_id", "b"),
+			)},
+			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: false, Check: getOnly},
+		},
+	})
+}
+
 func componentVersionResourceConfig() string {
 	return `
 resource "vew_component_version" "test" {
