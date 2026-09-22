@@ -222,6 +222,10 @@ func RetryAfter(header http.Header, now time.Time) time.Duration {
 
 func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds >= 0 {
+		const maxDurationSeconds = int64(1<<63-1) / int64(time.Second)
+		if int64(seconds) > maxDurationSeconds {
+			return 0, false
+		}
 		return time.Duration(seconds) * time.Second, true
 	}
 	if when, err := http.ParseTime(value); err == nil {

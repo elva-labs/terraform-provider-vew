@@ -141,6 +141,12 @@ func TestRetryAfterReturnsDeltaSeconds(t *testing.T) {
 	}
 }
 
+func TestRetryAfterReturnsZeroForOverflowingDeltaSeconds(t *testing.T) {
+	if got := RetryAfter(http.Header{"Retry-After": []string{"9223372037"}}, time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)); got != 0 {
+		t.Fatalf("RetryAfter = %v, want 0", got)
+	}
+}
+
 func TestRetryAfterReturnsHTTPDateDelay(t *testing.T) {
 	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
 	header := http.Header{"Retry-After": []string{now.Add(7 * time.Second).Format(http.TimeFormat)}}
