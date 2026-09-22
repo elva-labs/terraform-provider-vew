@@ -68,7 +68,8 @@ func (w *waiter) Until(parent context.Context, timeout, initialDelay time.Durati
 		w.jitter = jitterDelay
 	}
 
-	ctx, cancel := context.WithDeadline(parent, w.now().Add(timeout))
+	deadline := w.now().Add(timeout)
+	ctx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
 
 	lastStatus := ""
@@ -76,12 +77,15 @@ func (w *waiter) Until(parent context.Context, timeout, initialDelay time.Durati
 	attempt := 0
 	for {
 		if err := w.wait(ctx, delay); err != nil {
-			return waiterError(parent, ctx, lastStatus, err)
+			return w.waiterError(parent, ctx, deadline, lastStatus, err)
+		}
+		if !w.now().Before(deadline) {
+			return &TimeoutError{LastStatus: lastStatus}
 		}
 
 		result, err := read(ctx)
 		if err != nil {
-			return waiterError(parent, ctx, lastStatus, err)
+			return w.waiterError(parent, ctx, deadline, lastStatus, err)
 		}
 		lastStatus = result.Status
 
@@ -114,11 +118,11 @@ func (w *waiter) wait(ctx context.Context, delay time.Duration) error {
 	return w.sleep(ctx, delay)
 }
 
-func waiterError(parent, ctx context.Context, lastStatus string, err error) error {
+func (w *waiter) waiterError(parent, ctx context.Context, deadline time.Time, lastStatus string, err error) error {
 	if parentErr := parent.Err(); parentErr != nil {
 		return parentErr
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || !w.now().Before(deadline) {
 		return &TimeoutError{LastStatus: lastStatus}
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
