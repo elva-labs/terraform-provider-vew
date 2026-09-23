@@ -19,7 +19,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -92,7 +94,9 @@ func (r *componentVersionResource) Metadata(_ context.Context, request resource.
 func (r *componentVersionResource) Schema(_ context.Context, _ resource.SchemaRequest, response *resource.SchemaResponse) {
 	response.Schema = resourceschema.Schema{
 		Attributes: map[string]resourceschema.Attribute{
-			"id":                resourceschema.StringAttribute{Computed: true},
+			"id": resourceschema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
+			}},
 			"project_id":        requiredReplacementString(),
 			"component_id":      requiredReplacementString(),
 			"description":       resourceschema.StringAttribute{Required: true},
@@ -103,12 +107,14 @@ func (r *componentVersionResource) Schema(_ context.Context, _ resource.SchemaRe
 			"software_version":  resourceschema.StringAttribute{Required: true},
 			"license_dashboard": resourceschema.StringAttribute{Optional: true},
 			"notes":             resourceschema.StringAttribute{Optional: true},
-			"name":              resourceschema.StringAttribute{Computed: true},
-			"status":            resourceschema.StringAttribute{Computed: true},
-			"created_at":        resourceschema.StringAttribute{Computed: true},
-			"created_by":        resourceschema.StringAttribute{Computed: true},
-			"updated_at":        resourceschema.StringAttribute{Computed: true},
-			"updated_by":        resourceschema.StringAttribute{Computed: true},
+			"name": resourceschema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
+			}},
+			"status":     resourceschema.StringAttribute{Computed: true},
+			"created_at": resourceschema.StringAttribute{Computed: true},
+			"created_by": resourceschema.StringAttribute{Computed: true},
+			"updated_at": resourceschema.StringAttribute{Computed: true},
+			"updated_by": resourceschema.StringAttribute{Computed: true},
 		},
 		Blocks: map[string]resourceschema.Block{
 			"timeouts": resourceschema.SingleNestedBlock{Attributes: map[string]resourceschema.Attribute{
@@ -305,10 +311,19 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 	if stateDefinitionErr == nil && planDefinitionErr == nil && string(stateDefinition) == string(planDefinition) {
 		plan.DefinitionJSON = state.DefinitionJSON
 	}
-	stateDependencies, stateDependenciesDiagnostics := expandDependencies(ctx, state.Dependencies)
-	planDependencies, planDependenciesDiagnostics := expandDependencies(ctx, plan.Dependencies)
-	if !stateDependenciesDiagnostics.HasError() && !planDependenciesDiagnostics.HasError() && reflect.DeepEqual(stateDependencies, planDependencies) {
-		plan.Dependencies = state.Dependencies
+	planDependenciesUnknown, planDependenciesUnknownDiagnostics := dependenciesHaveUnknownValues(ctx, plan.Dependencies)
+	response.Diagnostics.Append(planDependenciesUnknownDiagnostics...)
+	dependenciesKnownDifference, dependenciesKnownDifferenceDiagnostics := dependenciesHaveKnownDifference(ctx, state.Dependencies, plan.Dependencies)
+	response.Diagnostics.Append(dependenciesKnownDifferenceDiagnostics...)
+	if response.Diagnostics.HasError() {
+		return
+	}
+	if !planDependenciesUnknownDiagnostics.HasError() && !planDependenciesUnknown {
+		stateDependencies, stateDependenciesDiagnostics := expandDependencies(ctx, state.Dependencies)
+		planDependencies, planDependenciesDiagnostics := expandDependencies(ctx, plan.Dependencies)
+		if !stateDependenciesDiagnostics.HasError() && !planDependenciesDiagnostics.HasError() && reflect.DeepEqual(stateDependencies, planDependencies) {
+			plan.Dependencies = state.Dependencies
+		}
 	}
 	for _, attribute := range []struct {
 		path  path.Path
@@ -317,7 +332,6 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 	}{
 		{path.Root("description"), state.Description, plan.Description},
 		{path.Root("definition_json"), state.DefinitionJSON, plan.DefinitionJSON},
-		{path.Root("dependencies"), state.Dependencies, plan.Dependencies},
 		{path.Root("software_vendor"), state.SoftwareVendor, plan.SoftwareVendor},
 		{path.Root("software_version"), state.SoftwareVersion, plan.SoftwareVersion},
 		{path.Root("license_dashboard"), state.LicenseDashboard, plan.LicenseDashboard},
@@ -329,6 +343,9 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 		if !attribute.state.Equal(attribute.plan) {
 			response.RequiresReplace = append(response.RequiresReplace, attribute.path)
 		}
+	}
+	if dependenciesKnownDifference || (!planDependenciesUnknown && !state.Dependencies.Equal(plan.Dependencies)) {
+		response.RequiresReplace = append(response.RequiresReplace, path.Root("dependencies"))
 	}
 }
 

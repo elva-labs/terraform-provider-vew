@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -361,6 +362,12 @@ func TestComponentVersionResourceSchema(t *testing.T) {
 	}
 	if attribute, ok := response.Schema.Attributes["release_type"].(resourceschema.StringAttribute); !ok || len(attribute.PlanModifiers) != 0 {
 		t.Fatalf("release_type must defer replacement to ModifyPlan, got %#v", response.Schema.Attributes["release_type"])
+	}
+	for _, name := range []string{"id", "name"} {
+		attribute, ok := response.Schema.Attributes[name].(resourceschema.StringAttribute)
+		if !ok || len(attribute.PlanModifiers) != 1 || reflect.TypeOf(attribute.PlanModifiers[0]) != reflect.TypeOf(stringplanmodifier.UseStateForUnknown()) {
+			t.Fatalf("%s must preserve its stable value while an update is planned, got %#v", name, response.Schema.Attributes[name])
+		}
 	}
 	dependencies, ok := response.Schema.Attributes["dependencies"].(resourceschema.ListNestedAttribute)
 	if !ok || dependencies.Default == nil || len(dependencies.NestedObject.Attributes) != 7 {
@@ -873,6 +880,60 @@ func TestReleasedComponentVersionUnknownValuesDoNotRequireReplacement(t *testing
 	response := modifyPlan(t, r, state, plan)
 	if response.Diagnostics.HasError() || len(response.RequiresReplace) != 0 {
 		t.Fatalf("unknown plan diagnostics/replacements = %v/%v", response.Diagnostics, response.RequiresReplace)
+	}
+}
+
+func TestReleasedComponentVersionUnknownDependencyIdentityDoesNotRequireReplacement(t *testing.T) {
+	r := NewComponentVersionResource().(*componentVersionResource)
+	state := validComponentVersionModel(t)
+	state.Status = types.StringValue("RELEASED")
+	state.Dependencies = dependencyList(dependencyModelWithOrder(1))
+
+	plan := state
+	dependency := dependencyModelWithOrder(1)
+	dependency.VersionID = types.StringUnknown()
+	dependency.VersionName = types.StringUnknown()
+	plan.Dependencies = dependencyList(dependency)
+
+	response := modifyPlan(t, r, state, plan)
+	if response.Diagnostics.HasError() || containsPath(response.RequiresReplace, path.Root("dependencies")) {
+		t.Fatalf("partially unknown dependencies diagnostics/replacements = %v/%v", response.Diagnostics, response.RequiresReplace)
+	}
+}
+
+func TestReleasedComponentVersionKnownDependencyChangeWithUnknownIdentityRequiresReplacement(t *testing.T) {
+	r := NewComponentVersionResource().(*componentVersionResource)
+	state := validComponentVersionModel(t)
+	state.Status = types.StringValue("RELEASED")
+	state.Dependencies = dependencyList(dependencyModelWithOrder(1))
+
+	plan := state
+	dependency := dependencyModelWithOrder(2)
+	dependency.VersionID = types.StringUnknown()
+	dependency.VersionName = types.StringUnknown()
+	plan.Dependencies = dependencyList(dependency)
+
+	response := modifyPlan(t, r, state, plan)
+	if response.Diagnostics.HasError() || !containsPath(response.RequiresReplace, path.Root("dependencies")) {
+		t.Fatalf("known dependency change diagnostics/replacements = %v/%v", response.Diagnostics, response.RequiresReplace)
+	}
+}
+
+func TestReleasedComponentVersionKnownDependencyChangeWithUnknownOrderRequiresReplacement(t *testing.T) {
+	r := NewComponentVersionResource().(*componentVersionResource)
+	state := validComponentVersionModel(t)
+	state.Status = types.StringValue("RELEASED")
+	state.Dependencies = dependencyList(dependencyModelWithOrder(1))
+
+	plan := state
+	dependency := dependencyModelWithOrder(1)
+	dependency.ComponentID = types.StringValue("different-component")
+	dependency.Order = types.Int64Unknown()
+	plan.Dependencies = dependencyList(dependency)
+
+	response := modifyPlan(t, r, state, plan)
+	if response.Diagnostics.HasError() || !containsPath(response.RequiresReplace, path.Root("dependencies")) {
+		t.Fatalf("known dependency change with unknown order diagnostics/replacements = %v/%v", response.Diagnostics, response.RequiresReplace)
 	}
 }
 

@@ -81,6 +81,101 @@ func validateDependencies(ctx context.Context, dependencies types.List) diag.Dia
 	return validateDependencyModels(models, true)
 }
 
+func dependenciesHaveUnknownValues(ctx context.Context, dependencies types.List) (bool, diag.Diagnostics) {
+	if dependencies.IsUnknown() {
+		return true, nil
+	}
+	if dependencies.IsNull() {
+		return false, nil
+	}
+
+	var models []dependencyModel
+	diagnostics := dependencies.ElementsAs(ctx, &models, false)
+	if diagnostics.HasError() {
+		return false, diagnostics
+	}
+	for _, model := range models {
+		if dependencyHasUnknownValue(model) {
+			return true, diagnostics
+		}
+	}
+	return false, diagnostics
+}
+
+func dependenciesHaveKnownDifference(ctx context.Context, state, plan types.List) (bool, diag.Diagnostics) {
+	if state.IsUnknown() || plan.IsUnknown() {
+		return false, nil
+	}
+
+	var stateModels, planModels []dependencyModel
+	var diagnostics diag.Diagnostics
+	if !state.IsNull() {
+		diagnostics.Append(state.ElementsAs(ctx, &stateModels, false)...)
+	}
+	if !plan.IsNull() {
+		diagnostics.Append(plan.ElementsAs(ctx, &planModels, false)...)
+	}
+	if diagnostics.HasError() {
+		return false, diagnostics
+	}
+	if len(stateModels) != len(planModels) {
+		return true, diagnostics
+	}
+
+	stateMatches := make([]int, len(stateModels))
+	for index := range stateMatches {
+		stateMatches[index] = -1
+	}
+	var matchPlanDependency func(int, []bool) bool
+	matchPlanDependency = func(planIndex int, visited []bool) bool {
+		for stateIndex := range stateModels {
+			if visited[stateIndex] || dependencyModelsHaveKnownDifference(stateModels[stateIndex], planModels[planIndex]) {
+				continue
+			}
+			visited[stateIndex] = true
+			if stateMatches[stateIndex] == -1 || matchPlanDependency(stateMatches[stateIndex], visited) {
+				stateMatches[stateIndex] = planIndex
+				return true
+			}
+		}
+		return false
+	}
+	for planIndex := range planModels {
+		if !matchPlanDependency(planIndex, make([]bool, len(stateModels))) {
+			return true, diagnostics
+		}
+	}
+	return false, diagnostics
+}
+
+func dependencyModelsHaveKnownDifference(state, plan dependencyModel) bool {
+	return knownInt64Difference(state.Order, plan.Order) ||
+		knownStringDifference(state.ComponentID, plan.ComponentID, "") ||
+		knownStringDifference(state.ComponentName, plan.ComponentName, "") ||
+		knownStringDifference(state.VersionID, plan.VersionID, "") ||
+		knownStringDifference(state.VersionName, plan.VersionName, "") ||
+		knownStringDifference(state.Type, plan.Type, "HELPER") ||
+		knownStringDifference(state.Position, plan.Position, "")
+}
+
+func knownStringDifference(state, plan types.String, nullValue string) bool {
+	if state.IsUnknown() || plan.IsUnknown() {
+		return false
+	}
+	stateValue, planValue := nullValue, nullValue
+	if !state.IsNull() {
+		stateValue = state.ValueString()
+	}
+	if !plan.IsNull() {
+		planValue = plan.ValueString()
+	}
+	return stateValue != planValue
+}
+
+func knownInt64Difference(state, plan types.Int64) bool {
+	return !state.IsNull() && !state.IsUnknown() && !plan.IsNull() && !plan.IsUnknown() && state.ValueInt64() != plan.ValueInt64()
+}
+
 func validateDependencyModels(models []dependencyModel, deferUnknown bool) diag.Diagnostics {
 	var diagnostics diag.Diagnostics
 	seenOrders := make(map[int64]int, len(models))
