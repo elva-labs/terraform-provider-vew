@@ -27,22 +27,29 @@ type TokenSource interface {
 
 // OAuthTokenSource implements the OAuth 2.0 client-credentials grant.
 type OAuthTokenSource struct {
-	tokenURL, clientID, clientSecret string
-	httpClient                       *http.Client
-	now                              func() time.Time
-	mu                               sync.Mutex
-	token                            string
-	tokenExp                         time.Time
-	flight                           *oauthRefresh
+	tokenURL, clientID, clientSecret, scope string
+	httpClient                              *http.Client
+	now                                     func() time.Time
+	mu                                      sync.Mutex
+	token                                   string
+	tokenExp                                time.Time
+	flight                                  *oauthRefresh
 }
 
 // NewOAuthTokenSource creates a token source for an absolute HTTP(S) token URL.
 func NewOAuthTokenSource(tokenURL, clientID, clientSecret string, httpClient *http.Client) (*OAuthTokenSource, error) {
+	return newOAuthTokenSource(tokenURL, clientID, clientSecret, oauthScope, httpClient)
+}
+
+func newOAuthTokenSource(tokenURL, clientID, clientSecret, scope string, httpClient *http.Client) (*OAuthTokenSource, error) {
 	if strings.TrimSpace(clientID) == "" {
 		return nil, errors.New("oauth client ID must not be empty")
 	}
 	if strings.TrimSpace(clientSecret) == "" {
 		return nil, errors.New("oauth client secret must not be empty")
+	}
+	if strings.TrimSpace(scope) == "" {
+		return nil, errors.New("oauth scope must not be empty")
 	}
 	u, err := url.Parse(tokenURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -51,7 +58,7 @@ func NewOAuthTokenSource(tokenURL, clientID, clientSecret string, httpClient *ht
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &OAuthTokenSource{tokenURL: tokenURL, clientID: clientID, clientSecret: clientSecret, httpClient: httpClient, now: time.Now}, nil
+	return &OAuthTokenSource{tokenURL: tokenURL, clientID: clientID, clientSecret: clientSecret, scope: scope, httpClient: httpClient, now: time.Now}, nil
 }
 
 type oauthTokenResponse struct {
@@ -95,7 +102,7 @@ func (s *OAuthTokenSource) Token(ctx context.Context, forceRefresh bool) (string
 	return token, err
 }
 func (s *OAuthTokenSource) refresh(ctx context.Context) (string, time.Time, error) {
-	form := url.Values{"grant_type": {"client_credentials"}, "scope": {oauthScope}}
+	form := url.Values{"grant_type": {"client_credentials"}, "scope": {s.scope}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", time.Time{}, errors.New("oauth token request could not be created")

@@ -3,11 +3,14 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
+	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -171,27 +174,149 @@ func TestProviderConfigureSetsProviderData(t *testing.T) {
 	if !ok || data.Components == nil {
 		t.Fatalf("expected ResourceData to contain providerdata.Data with components API, got %T", response.ResourceData)
 	}
-	if data.ComponentVersions == nil || data.Waiter == nil {
-		t.Fatalf("expected ResourceData to include component-version API and waiter, got %#v", data)
+	if data.ComponentVersions == nil || data.Pipelines == nil || data.Recipes == nil || data.RecipeVersions == nil || data.Waiter == nil {
+		t.Fatalf("expected ResourceData to include version APIs, pipeline API, recipe API, and waiter, got %#v", data)
+	}
+	if data.ComponentVersionReleases == nil || data.RecipeVersionReleases == nil {
+		t.Fatalf("expected ResourceData to include release APIs, got %#v", data)
 	}
 	if _, ok := response.DataSourceData.(providerdata.Data); !ok {
 		t.Fatalf("expected DataSourceData to contain providerdata.Data, got %T", response.DataSourceData)
 	}
+	if _, ok := response.ActionData.(providerdata.Data); !ok {
+		t.Fatalf("expected ActionData to contain providerdata.Data, got %T", response.ActionData)
+	}
 }
 
-func TestProviderResourcesIncludesComponentVersion(t *testing.T) {
+func TestProviderReleaseActionsUseOnlyReleaseScopes(t *testing.T) {
+	var requestedScopes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth/token":
+			if err := request.ParseForm(); err != nil {
+				t.Errorf("parse token form: %v", err)
+				return
+			}
+			requestedScopes = append(requestedScopes, request.Form.Get("scope"))
+			_, _ = fmt.Fprint(w, `{"access_token":"test-token","expires_in":3600}`)
+		case "/api/projects/project-1/components/component-1/versions/version-1/release":
+			_, _ = fmt.Fprint(w, `{"componentVersionId":"version-1"}`)
+		case "/api/projects/project-1/recipes/recipe-1/versions/version-1/release":
+			_, _ = fmt.Fprint(w, `{"recipeVersionId":"version-1"}`)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	p := New("test")()
+	var schemaResponse provider.SchemaResponse
+	p.Schema(context.Background(), provider.SchemaRequest{}, &schemaResponse)
+	request := provider.ConfigureRequest{Config: tfsdk.Config{
+		Schema: schemaResponse.Schema,
+		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
+			"api_url":       tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"token_url":     tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":     tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret": tftypes.NewValue(tftypes.String, "test-secret"),
+		})}}
+	var response provider.ConfigureResponse
+	p.Configure(context.Background(), request, &response)
+	assertNoDiagnostics(t, response.Diagnostics)
+	data := response.ActionData.(providerdata.Data)
+	if err := data.ComponentVersionReleases.ReleaseComponentVersion(context.Background(), "project-1", "component-1", "version-1"); err != nil {
+		t.Fatalf("release component version: %v", err)
+	}
+	if err := data.RecipeVersionReleases.ReleaseRecipeVersion(context.Background(), "project-1", "recipe-1", "version-1"); err != nil {
+		t.Fatalf("release recipe version: %v", err)
+	}
+	want := []string{"clients/packaging/component.release", "clients/packaging/recipe.release"}
+	if len(requestedScopes) != len(want) {
+		t.Fatalf("requested scopes = %q, want %q", requestedScopes, want)
+	}
+	for index := range want {
+		if requestedScopes[index] != want[index] {
+			t.Fatalf("requested scope[%d] = %q, want %q", index, requestedScopes[index], want[index])
+		}
+	}
+}
+
+func TestProviderPipelineUsesOnlyPipelineScopes(t *testing.T) {
+	var requestedScope string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth/token":
+			if err := request.ParseForm(); err != nil {
+				t.Errorf("parse token form: %v", err)
+				return
+			}
+			requestedScope = request.Form.Get("scope")
+			_, _ = fmt.Fprint(w, `{"access_token":"test-token","expires_in":3600}`)
+		case "/api/projects/project-1/pipelines/pipe-1":
+			_, _ = fmt.Fprint(w, `{"pipeline":{"projectId":"project-1","pipelineId":"pipe-1","pipelineName":"test","pipelineDescription":"test","recipeId":"reci-1","recipeName":"recipe","recipeVersionId":"vers-1","recipeVersionName":"1.0.0","buildInstanceTypes":["m8i.2xlarge"],"pipelineSchedule":"0 0 * * ? *","status":"CREATED","createDate":"2026-01-01","createdBy":"test","lastUpdateDate":"2026-01-01","lastUpdatedBy":"test"}}`)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	p := New("test")()
+	var schemaResponse provider.SchemaResponse
+	p.Schema(context.Background(), provider.SchemaRequest{}, &schemaResponse)
+	request := provider.ConfigureRequest{Config: tfsdk.Config{
+		Schema: schemaResponse.Schema,
+		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
+			"api_url":       tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"token_url":     tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":     tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret": tftypes.NewValue(tftypes.String, "test-secret"),
+		})}}
+	var response provider.ConfigureResponse
+	p.Configure(context.Background(), request, &response)
+	assertNoDiagnostics(t, response.Diagnostics)
+	data := response.ResourceData.(providerdata.Data)
+	if _, err := data.Pipelines.GetPipeline(context.Background(), "project-1", "pipe-1"); err != nil {
+		t.Fatalf("read pipeline: %v", err)
+	}
+	if want := "clients/packaging/pipeline.read clients/packaging/pipeline.write"; requestedScope != want {
+		t.Fatalf("pipeline OAuth scope = %q, want %q", requestedScope, want)
+	}
+}
+
+func TestProviderResourcesIncludesPipelines(t *testing.T) {
 	t.Parallel()
 
 	resources := New("test")().Resources(context.Background())
-	if len(resources) != 2 {
-		t.Fatalf("resource constructors = %d, want 2", len(resources))
+	if len(resources) != 5 {
+		t.Fatalf("resource constructors = %d, want 5", len(resources))
 	}
-	want := []string{"vew_component", "vew_component_version"}
+	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version"}
 	for index, constructor := range resources {
 		var response resource.MetadataResponse
 		constructor().Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "vew"}, &response)
 		if response.TypeName != want[index] {
 			t.Fatalf("resource[%d] type = %q, want %q", index, response.TypeName, want[index])
+		}
+	}
+}
+
+func TestProviderActionsIncludesVersionReleases(t *testing.T) {
+	t.Parallel()
+
+	providerWithActions, ok := New("test")().(provider.ProviderWithActions)
+	if !ok {
+		t.Fatal("provider does not implement provider.ProviderWithActions")
+	}
+	actions := providerWithActions.Actions(context.Background())
+	if len(actions) != 2 {
+		t.Fatalf("action constructors = %d, want 2", len(actions))
+	}
+	want := []string{"vew_component_version_release", "vew_recipe_version_release"}
+	for index, constructor := range actions {
+		var response action.MetadataResponse
+		constructor().Metadata(context.Background(), action.MetadataRequest{ProviderTypeName: "vew"}, &response)
+		if response.TypeName != want[index] {
+			t.Fatalf("action[%d] type = %q, want %q", index, response.TypeName, want[index])
 		}
 	}
 }

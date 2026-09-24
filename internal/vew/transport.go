@@ -30,12 +30,30 @@ type Transport struct {
 
 // NewTransport constructs an authenticated transport from validated HTTP(S) endpoints.
 func NewTransport(config Config) (*Transport, error) {
+	return newTransport(config, oauthScope)
+}
+
+// NewTransportWithScopes constructs a transport whose token source requests the
+// supplied scopes instead of the default component scopes.
+func NewTransportWithScopes(config Config, scopes ...string) (*Transport, error) {
+	if len(scopes) == 0 {
+		return nil, errors.New("VEW OAuth scopes must not be empty")
+	}
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) == "" || strings.ContainsAny(scope, " \t\r\n") {
+			return nil, errors.New("VEW OAuth scope must be a nonempty token")
+		}
+	}
+	return newTransport(config, strings.Join(scopes, " "))
+}
+
+func newTransport(config Config, scope string) (*Transport, error) {
 	baseURL, err := parseHTTPURL(config.APIURL)
 	if err != nil {
 		return nil, errors.New("VEW API URL must be an absolute HTTP or HTTPS URL")
 	}
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	tokens, err := NewOAuthTokenSource(config.TokenURL, config.ClientID, config.ClientSecret, httpClient)
+	tokens, err := newOAuthTokenSource(config.TokenURL, config.ClientID, config.ClientSecret, scope, httpClient)
 	if err != nil {
 		return nil, err
 	}

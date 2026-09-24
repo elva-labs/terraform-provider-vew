@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -171,6 +172,105 @@ func TestRetireComponentVersionMapsRequestAndActionResponse(t *testing.T) {
 	got, err := NewClient(newComponentTestTransport(t, server.URL)).RetireComponentVersion(context.Background(), "proj", "cmp", "version")
 	if err != nil || got.ID != "version-123" {
 		t.Fatalf("result/err = %#v/%v", got, err)
+	}
+}
+
+func TestReleaseComponentVersionMapsBodylessRequestAndAcceptsAlreadyReleased(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/oauth/token" {
+			_, _ = io.WriteString(w, `{"access_token":"token","expires_in":3600}`)
+			return
+		}
+		calls++
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.Method != http.MethodPost || request.URL.Path != "/projects/proj/components/cmp/versions/version/release" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if len(body) != 0 || request.Header.Get("Idempotency-Key") != "" {
+			t.Fatalf("body/key = %q/%q", body, request.Header.Get("Idempotency-Key"))
+		}
+		_, _ = io.WriteString(w, `{"componentVersionId":"version"}`)
+	}))
+	defer server.Close()
+	client := NewClient(newComponentTestTransport(t, server.URL))
+	if err := client.ReleaseComponentVersion(context.Background(), "proj", "cmp", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ReleaseComponentVersion(context.Background(), "proj", "cmp", "version"); err != nil {
+		t.Fatalf("already released: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestReleaseComponentVersionRejectsMismatchedResponseID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/oauth/token" {
+			_, _ = io.WriteString(w, `{"access_token":"token","expires_in":3600}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"componentVersionId":"other-version"}`)
+	}))
+	defer server.Close()
+	err := NewClient(newComponentTestTransport(t, server.URL)).ReleaseComponentVersion(context.Background(), "proj", "cmp", "version")
+	if err == nil || err.Error() != "VEW component version release response ID did not match requested version" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReleaseComponentVersionReturnsVEWRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/oauth/token" {
+			_, _ = io.WriteString(w, `{"access_token":"token","expires_in":3600}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"code":"INVALID_COMPONENT_VERSION_STATUS","requestId":"request-1"}`)
+	}))
+	defer server.Close()
+	err := NewClient(newComponentTestTransport(t, server.URL)).ReleaseComponentVersion(context.Background(), "proj", "cmp", "version")
+	var apiErr *vew.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Problem.Code != "INVALID_COMPONENT_VERSION_STATUS" || apiErr.Problem.RequestID != "request-1" {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestReleaseComponentVersionRetriesAfterLostResponseWithoutCreateKey(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/oauth/token" {
+			_, _ = io.WriteString(w, `{"access_token":"token","expires_in":3600}`)
+			return
+		}
+		calls++
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) != 0 || request.Header.Get("Idempotency-Key") != "" {
+			t.Fatalf("body/key = %q/%q", body, request.Header.Get("Idempotency-Key"))
+		}
+		if calls == 1 {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = connection.Close()
+			return
+		}
+		_, _ = io.WriteString(w, `{"componentVersionId":"version"}`)
+	}))
+	defer server.Close()
+	if err := NewClient(newComponentTestTransport(t, server.URL)).ReleaseComponentVersion(context.Background(), "proj", "cmp", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
 	}
 }
 

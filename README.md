@@ -1,14 +1,16 @@
 # Terraform Provider for VEW
 
-This proof-of-concept Terraform provider manages VEW components and component
-versions. It uses the VEW OAuth 2.0 client-credentials flow and exposes the
-`vew_component` and `vew_component_version` resources.
+This proof-of-concept Terraform provider manages VEW components, component
+versions, recipes, recipe versions, and image pipelines. It uses the VEW OAuth
+2.0 client-credentials flow and exposes the `vew_component`,
+`vew_component_version`, `vew_recipe`, `vew_recipe_version`, and `vew_pipeline`
+resources.
 
 ## Prerequisites
 
 - Go 1.27 or newer (the module declares `go 1.27.0`).
 - Terraform 1.16.3 for the documented local-development workflow.
-- VEW API credentials and a project in which to manage components.
+- VEW API credentials and a project in which to manage resources.
 
 The provider uses these environment variables when the corresponding provider
 attribute is omitted or empty:
@@ -83,6 +85,50 @@ The process timeout is four hours to accommodate create, update, retirement,
 and cleanup. To compile and check both acceptance gates without contacting VEW,
 run `make testacc TF_ACC=` and
 `make testacc-component-version TF_ACC= VEW_ACC_COMPONENT_VERSION=`.
+
+The recipe acceptance test has its own explicit gate and target:
+
+```shell
+TF_ACC=1 VEW_ACC_RECIPE=1 \
+  VEW_API_URL=https://vew.example/api \
+  VEW_TOKEN_URL=https://oauth.example/token \
+  VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
+  VEW_TEST_PROJECT_ID=prog-73488 \
+  make testacc-recipe
+```
+
+It creates uniquely named disposable recipe resources in the supplied project,
+updates and imports a recipe version, then retires the version before archiving
+the recipe. It does not mutate existing recipes. Run it only in a disposable
+project; the live run has API side effects and may leave resources behind if it
+is interrupted. It is skipped unless `TF_ACC=1`, `VEW_ACC_RECIPE=1`, the four
+provider environment variables, and `VEW_TEST_PROJECT_ID` are all set. To check
+that the gated test compiles without contacting VEW, run
+`make testacc-recipe TF_ACC= VEW_ACC_RECIPE=`.
+
+The pipeline acceptance test has a separate gate and target. It requires a
+released recipe version in the supplied project:
+
+```shell
+TF_ACC=1 VEW_ACC_PIPELINE=1 \
+  VEW_API_URL=https://vew.example/api \
+  VEW_TOKEN_URL=https://oauth.example/token \
+  VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
+  VEW_TEST_PROJECT_ID=prog-73488 \
+  VEW_TEST_RECIPE_ID=recipe-123 \
+  VEW_TEST_RECIPE_VERSION_ID=version-456 \
+  make testacc-pipeline
+```
+
+The test creates a uniquely named disposable pipeline using that already
+released recipe version, verifies update and import, and retires the pipeline
+during cleanup. It does not start an image build. It is skipped unless
+`TF_ACC=1`, `VEW_ACC_PIPELINE=1`, all four provider environment variables,
+`VEW_TEST_PROJECT_ID`, `VEW_TEST_RECIPE_ID`, and
+`VEW_TEST_RECIPE_VERSION_ID` are set. Use a disposable project and a released
+version that belongs to the supplied recipe. To compile the gated test without
+contacting VEW, run
+`make testacc-pipeline TF_ACC= VEW_ACC_PIPELINE=`.
 
 ## Local Terraform development override
 
@@ -223,10 +269,216 @@ Import IDs use `project_id/component_id/version_id`:
 terraform import vew_component_version.example PROJECT_ID/COMPONENT_ID/VERSION_ID
 ```
 
+## Recipe resource
+
+The complete example is in
+[`examples/resources/vew_recipe/resource.tf`](examples/resources/vew_recipe/resource.tf).
+`vew_recipe` requires `project_id`, `name`, `description`, `platform`,
+`architecture`, and `os_version`. It computes `id`, `status`, `created_at`,
+`created_by`, `updated_at`, and `updated_by`. VEW currently accepts `Linux` with
+`Ubuntu 24` and `amd64` or `arm64`, or `Windows` with `Microsoft Windows Server
+2025` and `amd64`. The provider validates these combinations before sending a
+request. All configured fields require replacement because VEW has no recipe
+update endpoint.
+
+The S2S OAuth client must have both `clients/packaging/recipe.read` and
+`clients/packaging/recipe.write` scopes explicitly granted, as well as access to
+the VEW project named by `project_id`. The recipe resources use that project for
+all API operations; recipe versions must use the same project and the parent
+recipe's ID.
+
+Deleting a recipe archives it in VEW. VEW refuses to archive a recipe while it
+has any version that is not `RETIRED`, so Terraform dependencies should ensure
+the versions retire before the recipe is archived. A remote `ARCHIVED` recipe
+or `404` is treated as absent and removed from state. When VEW identifies a
+blocking version, the archive diagnostic names that version and its status;
+Terraform keeps the recipe in state so deletion can be retried.
+
+Recipe import IDs use `project_id/recipe_id`:
+
+```shell
+terraform import vew_recipe.example prog-73488/recipe-123
+```
+
+Recipe create uses an idempotency key across transport retries. If VEW accepts
+the create but Terraform loses the response or crashes before recording the
+recipe ID, a later apply cannot reuse that key. Inspect VEW before retrying to
+avoid creating a duplicate.
+
+## Recipe version resource
+
+The resource example is in
+[`examples/resources/vew_recipe_version/resource.tf`](examples/resources/vew_recipe_version/resource.tf).
+The recipe ID and project are direct references to the parent recipe. The
+`configured_components` can reference component and version IDs from
+`vew_component` and `vew_component_version`. Each ordered entry requires
+`component_id`, `version_id`, and `type` (`MAIN` or `HELPER`). The provider
+derives order from list position and looks up omitted names through the
+component read API before writes. Existing configurations can still supply
+names and positive unique order values. The OAuth client therefore also needs
+`clients/packaging/component.read` and `.write` granted because the component
+transport requests both scopes. The provider does not release
+component versions for you. VEW accepts selected component
+versions in `VALIDATED` or `RELEASED` state; releasing a recipe and any
+required component versions remains a separate VEW action.
+
+Required attributes are `project_id`, `recipe_id`, `description`,
+`volume_size`, and `configured_components`. Supply the configured list for both
+create and import; use `[]` when no components are selected. Set `release_type`
+to `MAJOR`, `MINOR`, or `PATCH` when creating a version; omit it when importing
+because VEW does not expose the original create instruction. `volume_size` is
+an integer from 8 through 500 GB. `integrations` is an optional set of nonempty strings and defaults to an
+empty set. Computed attributes include `id`, `name`, `status`,
+`effective_components`, and the created/updated timestamps and actors.
+`configured_components` preserves the caller's intended selection;
+`effective_components` reflects VEW's resolved list, including mandatory
+components, and does not replace configured intent.
+
+VEW tests a created or updated version asynchronously. Terraform waits through
+`CREATING`, `CREATED`, `TESTING`, and `UPDATING` until the version is
+`VALIDATED` or `FAILED`. Create and update default to 60 minutes, and delete
+defaults to 30 minutes. Override these with a `timeouts` block using Go duration
+strings, for example `create = "90m"`. Terraform delete retires the version and
+waits for `RETIRED`; a `RETIRED` version or `404` is treated as absent.
+
+Release is a separate VEW action and is not managed by Terraform. A released
+version remains readable, but changes to its content require replacement.
+VEW does not return `release_type`. The provider retains it for versions it
+creates, but imported versions leave it unset. VEW does return the version name
+(for example, `1.0.0`) as computed `name`. Changing a recorded `release_type`
+requires replacement; removing it only forgets the local create instruction.
+VEW may omit configured component selection on reads. The provider
+keeps a known Terraform selection during refresh. On the first refresh after
+import, it uses the effective list as the comparison baseline, even when VEW
+omits configured selection. Import itself changes only Terraform state. The
+first plan compares ordered component IDs, version IDs, and type; differences
+plan an update for a mutable version or replacement for a released version.
+VEW may include mandatory components in that baseline, so review the first
+plan before applying it. Supply `configured_components` in the imported
+resource's Terraform configuration, including `[]` for an empty selection.
+
+Recipe-version import IDs use `project_id/recipe_id/version_id`:
+
+```shell
+terraform import vew_recipe_version.example prog-73488/recipe-123/version-456
+```
+
+## Release actions
+
+VEW releases are one-way operations, so they are separate provider actions and
+never happen as a side effect of creating or updating a version resource. The
+[`vew_component_version_release`](docs/actions/vew_component_version_release.md)
+action releases a validated component version, and the
+[`vew_recipe_version_release`](docs/actions/vew_recipe_version_release.md)
+action releases a validated recipe version. The caller must have the
+corresponding VEW release permission and access to the specified project.
+
+Apply the version resources first so they exist and are validated. Then invoke
+the component release action, followed by the recipe release action. A recipe
+can only be released after its selected component versions are released when
+VEW requires that state:
+
+```shell
+terraform apply
+terraform apply -invoke=action.vew_component_version_release.example
+terraform apply -invoke=action.vew_recipe_version_release.example
+terraform apply
+```
+
+The last normal apply refreshes the version resources and records their
+`RELEASED` status before dependent configuration, such as a pipeline, is
+applied. If an action fails, correct the cause and explicitly invoke that
+action again; Terraform does not remember a failed invocation as a retryable
+resource operation. Do not remove or taint the version to retry a release.
+
+Runnable CLI examples are in
+[`examples/actions/component-version-release`](examples/actions/component-version-release)
+and [`examples/actions/recipe-version-release`](examples/actions/recipe-version-release).
+Optional automatic-release examples are in
+[`examples/actions/component-version-release-after-create`](examples/actions/component-version-release-after-create)
+and [`examples/actions/recipe-version-release-after-create`](examples/actions/recipe-version-release-after-create).
+They use `lifecycle.action_trigger` after creation with `on_failure = halt`,
+which stops the apply without tainting or replacing the version. A later apply
+does not retry the action; invoke it explicitly after correcting the failure.
+
+Release actions do not create Terraform state or reverse a release. Removing
+an action block only removes its local invocation configuration. Removing a
+version resource from configuration still follows that resource's delete
+behavior (VEW retirement), and VEW may reject retirement of a released
+version. The provider does not automatically retire released versions or
+release versions based on updates. VEW remains the authority for release
+eligibility, prerequisites, and whether a release request is accepted. Do not
+configure `after_update` triggers: they can invoke a one-way release
+repeatedly. There is no provider-imposed limit of two release invocations; VEW
+decides whether a given version can be released again.
+
+Recipe-version create also uses an idempotency key across transport retries. If
+VEW accepts creation but Terraform crashes before recording the returned ID,
+the key cannot be reused by a later apply; inspect VEW before retrying. After
+validation starts, Terraform retains the version ID and reconciles remote state
+on a later apply if polling is interrupted.
+
+## Pipeline resource
+
+The example is in
+[`examples/resources/vew_pipeline/resource.tf`](examples/resources/vew_pipeline/resource.tf).
+It imports the existing recipe into Terraform using its project and recipe IDs,
+then references that resource and takes a released recipe-version ID as an
+input. Set the recipe attributes to their current VEW values so import does not
+plan a recipe replacement. The version must belong to that recipe and already
+be `RELEASED` in VEW before creating or updating the pipeline. Recipe-version
+release uses the provider's separate `vew_recipe_version_release` action and is
+never a side effect of pipeline management. If VEW rejects an unreleased
+version, the provider reports `Recipe version is not released`, names the
+requested recipe and version IDs, and directs you to invoke the release action,
+refresh, and retry `terraform apply`.
+
+The required configuration fields are `project_id`, `name`, `description`,
+`recipe_id`, `recipe_version_id`, `build_instance_types`, and `schedule`.
+`build_instance_types` is a nonempty ordered list of nonempty strings.
+`schedule` is VEW's six-field expression without a `cron(...)` wrapper. The
+optional `product_id` associates a product. Computed values include `id`,
+`status`, recipe names, distribution and infrastructure configuration ARNs,
+pipeline ARN, and audit fields. A nullable ARN or product association remains
+null when VEW has no value.
+
+Changes to `project_id`, `name`, `description`, or `recipe_id` replace the
+pipeline. Changes to `recipe_version_id`, `build_instance_types`, `schedule`,
+or `product_id` update it in place. Remove `product_id` from configuration (or
+set it to `null`) to clear the remote association; the update sends that clear
+explicitly. Build instance types preserve list order. Terraform does structural
+validation, while VEW validates the deployment-specific instance types and
+complete schedule semantics.
+
+The OAuth client needs `clients/packaging/pipeline.read` and
+`clients/packaging/pipeline.write` explicitly granted, plus project assignment
+for the configured project. Pipeline management does not require
+`clients/packaging/pipeline.execute`. Creating or updating a pipeline only
+configures it; image-build execution is a separate operation and is never
+started by this resource.
+
+Create and update wait through asynchronous work until the pipeline is
+`CREATED`; delete retires it and waits until it is `RETIRED`. The defaults are
+60 minutes for create and update and 30 minutes for delete. Override them with
+resource `timeouts` using Go duration strings, such as `create = "90m"`.
+Terraform read removes a missing (`404`) or retired pipeline from state. Import
+IDs use `project_id/pipeline_id` and only read the remote pipeline:
+
+```shell
+terraform import vew_pipeline.example prog-73488/pipeline-123
+```
+
+If polling is interrupted after VEW accepts create or update, Terraform keeps
+the pipeline ID and latest safe status so a later apply can reconcile the
+operation. There remains a process-crash window if VEW accepts create before
+Terraform records the returned ID; the same idempotency key is reused for
+transport retries within that attempt, but not across a later Terraform run.
+Inspect VEW before retrying after such a crash to avoid creating a duplicate.
+
 ## Domain package layout
 
 Shared OAuth, HTTP transport, errors, and polling live in `internal/vew`.
-Component and component-version API models and endpoint clients live in
-`internal/vew/components`. Terraform resource implementations live in
-`internal/provider/components`, while `internal/providerdata` carries the
-configured domain interfaces from the root provider to those resources.
+Domain API models and endpoint clients live in `internal/vew/components`,
+`internal/vew/recipes`, and `internal/vew/pipelines`. Terraform resources live
+in the matching `internal/provider` packages, while `internal/providerdata`
+carries their configured interfaces from the root provider.

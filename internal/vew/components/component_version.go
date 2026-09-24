@@ -81,6 +81,14 @@ type ComponentVersionAPI interface {
 
 var _ ComponentVersionAPI = (*Client)(nil)
 
+// ComponentVersionReleaseAPI is the narrow component-version release surface
+// used by callers configured with release-only credentials.
+type ComponentVersionReleaseAPI interface {
+	ReleaseComponentVersion(context.Context, string, string, string) error
+}
+
+var _ ComponentVersionReleaseAPI = (*Client)(nil)
+
 // CreateComponentVersion creates a component version and returns its action details.
 func (c *Client) CreateComponentVersion(ctx context.Context, projectID, componentID string, input CreateComponentVersionInput) (ActionResult, error) {
 	body, err := json.Marshal(input)
@@ -155,6 +163,28 @@ func (c *Client) RetireComponentVersion(ctx context.Context, projectID, componen
 		return ActionResult{}, err
 	}
 	return decodeComponentVersionAction(response, headers, "retire")
+}
+
+// ReleaseComponentVersion promotes an existing component version. The release
+// endpoint is terminal and idempotent, so it intentionally uses neither a
+// request body nor a create idempotency key.
+func (c *Client) ReleaseComponentVersion(ctx context.Context, projectID, componentID, versionID string) error {
+	segments, err := componentVersionSegments(projectID, componentID, versionID, true)
+	if err != nil {
+		return err
+	}
+	response, headers, err := c.transport.Do(ctx, http.MethodPost, append(segments, "release"), nil, "")
+	if err != nil {
+		return err
+	}
+	result, err := decodeComponentVersionAction(response, headers, "release")
+	if err != nil {
+		return err
+	}
+	if result.ID != versionID {
+		return errors.New("VEW component version release response ID did not match requested version")
+	}
+	return nil
 }
 
 func componentVersionSegments(projectID, componentID, versionID string, item bool) ([]string, error) {

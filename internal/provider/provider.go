@@ -7,9 +7,15 @@ import (
 	"strings"
 
 	providercomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/components"
+	providerpipelines "github.com/elva-labs/terraform-provider-vew/internal/provider/pipelines"
+	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
+	providerreleaseactions "github.com/elva-labs/terraform-provider-vew/internal/provider/releaseactions"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
+	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -69,14 +75,44 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		response.Diagnostics.AddError("Unable to configure VEW client", "The VEW client could not be configured.")
 		return
 	}
+	recipeTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/recipe.read", "clients/packaging/recipe.write")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW recipe client", "The VEW recipe client could not be configured.")
+		return
+	}
+	componentReleaseTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/component.release")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW component version release client", "The VEW component version release client could not be configured.")
+		return
+	}
+	recipeReleaseTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/recipe.release")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW recipe version release client", "The VEW recipe version release client could not be configured.")
+		return
+	}
+	pipelineTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/pipeline.read", "clients/packaging/pipeline.write")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW pipeline client", "The VEW pipeline client could not be configured.")
+		return
+	}
 	api := components.NewClient(transport)
+	recipeAPI := recipes.NewClient(recipeTransport)
+	componentReleaseAPI := components.NewClient(componentReleaseTransport)
+	recipeReleaseAPI := recipes.NewClient(recipeReleaseTransport)
+	pipelineAPI := pipelines.NewClient(pipelineTransport)
 	data := providerdata.Data{
-		Components:        api,
-		ComponentVersions: api,
-		Waiter:            vew.NewWaiter(),
+		Components:               api,
+		ComponentVersions:        api,
+		ComponentVersionReleases: componentReleaseAPI,
+		Pipelines:                pipelineAPI,
+		Recipes:                  recipeAPI,
+		RecipeVersions:           recipeAPI,
+		RecipeVersionReleases:    recipeReleaseAPI,
+		Waiter:                   vew.NewWaiter(),
 	}
 	response.ResourceData = data
 	response.DataSourceData = data
+	response.ActionData = data
 }
 
 func resolveProviderConfig(model providerModel, getenv func(string) (string, bool)) (vew.Config, diag.Diagnostics) {
@@ -130,9 +166,19 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		func() resource.Resource { return providercomponents.NewComponentResource() },
 		providercomponents.NewComponentVersionResource,
+		providerpipelines.NewPipelineResource,
+		providerrecipes.NewRecipeResource,
+		providerrecipes.NewRecipeVersionResource,
 	}
 }
 
 func (p *vewProvider) DataSources(context.Context) []func() datasource.DataSource {
 	return nil
+}
+
+func (p *vewProvider) Actions(context.Context) []func() action.Action {
+	return []func() action.Action{
+		providerreleaseactions.NewComponentVersionReleaseAction,
+		providerreleaseactions.NewRecipeVersionReleaseAction,
+	}
 }

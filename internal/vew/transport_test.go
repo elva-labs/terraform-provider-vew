@@ -6,12 +6,62 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestTransportScopesKeepComponentAndRecipeTokensSeparate(t *testing.T) {
+	var requested []string
+	var authorized []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth/token" {
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+				return
+			}
+			scope := r.Form.Get("scope")
+			requested = append(requested, scope)
+			_, _ = io.WriteString(w, `{"access_token":"token-`+strconv.Itoa(len(requested))+`","expires_in":3600}`)
+			return
+		}
+		authorized = append(authorized, r.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	config := Config{APIURL: server.URL, TokenURL: server.URL + "/oauth/token", ClientID: "id", ClientSecret: "secret"}
+	component, err := NewTransport(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe, err := NewTransportWithScopes(config, "clients/packaging/recipe.read", "clients/packaging/recipe.write")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, transport := range []*Transport{component, recipe, component, recipe} {
+		if _, _, err := transport.Do(context.Background(), http.MethodGet, []string{"projects", "project"}, nil, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(requested) != 2 || requested[0] != oauthScope || requested[1] != "clients/packaging/recipe.read clients/packaging/recipe.write" {
+		t.Fatalf("requested scopes = %q", requested)
+	}
+	if strings.Join(authorized, ",") != "Bearer token-1,Bearer token-2,Bearer token-1,Bearer token-2" {
+		t.Fatalf("API authorizations = %q", authorized)
+	}
+}
+
+func TestTransportScopesRejectInvalidInput(t *testing.T) {
+	config := Config{APIURL: "https://vew.example", TokenURL: "https://token.example", ClientID: "id", ClientSecret: "secret"}
+	for _, scopes := range [][]string{nil, {""}, {"valid", "two words"}} {
+		if _, err := NewTransportWithScopes(config, scopes...); err == nil {
+			t.Fatalf("expected invalid scopes %q to fail", scopes)
+		}
+	}
+}
 
 // TestTransportEscapesEachPathSegmentIndependently would fail if Do joined
 // path segments before escaping them: slashes and dot segments would then be
