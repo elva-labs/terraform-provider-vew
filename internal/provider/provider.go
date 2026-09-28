@@ -7,16 +7,21 @@ import (
 	"strings"
 
 	providercomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/components"
+	providerimageactions "github.com/elva-labs/terraform-provider-vew/internal/provider/imageactions"
 	providerimages "github.com/elva-labs/terraform-provider-vew/internal/provider/images"
 	providerpipelines "github.com/elva-labs/terraform-provider-vew/internal/provider/pipelines"
+	providerprojectaccounts "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccounts"
 	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
 	providerreleaseactions "github.com/elva-labs/terraform-provider-vew/internal/provider/releaseactions"
+	providertechnologies "github.com/elva-labs/terraform-provider-vew/internal/provider/technologies"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
 	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -33,10 +38,11 @@ type vewProvider struct {
 }
 
 type providerModel struct {
-	APIURL       types.String `tfsdk:"api_url"`
-	TokenURL     types.String `tfsdk:"token_url"`
-	ClientID     types.String `tfsdk:"client_id"`
-	ClientSecret types.String `tfsdk:"client_secret"`
+	APIURL         types.String `tfsdk:"api_url"`
+	ProjectsAPIURL types.String `tfsdk:"projects_api_url"`
+	TokenURL       types.String `tfsdk:"token_url"`
+	ClientID       types.String `tfsdk:"client_id"`
+	ClientSecret   types.String `tfsdk:"client_secret"`
 }
 
 func New(version string) func() provider.Provider {
@@ -53,10 +59,11 @@ func (p *vewProvider) Metadata(_ context.Context, _ provider.MetadataRequest, re
 func (p *vewProvider) Schema(_ context.Context, _ provider.SchemaRequest, response *provider.SchemaResponse) {
 	response.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"api_url":       schema.StringAttribute{Optional: true},
-			"token_url":     schema.StringAttribute{Optional: true},
-			"client_id":     schema.StringAttribute{Optional: true},
-			"client_secret": schema.StringAttribute{Optional: true, Sensitive: true},
+			"api_url":          schema.StringAttribute{Optional: true},
+			"projects_api_url": schema.StringAttribute{Optional: true},
+			"token_url":        schema.StringAttribute{Optional: true},
+			"client_id":        schema.StringAttribute{Optional: true},
+			"client_secret":    schema.StringAttribute{Optional: true, Sensitive: true},
 		},
 	}
 }
@@ -107,10 +114,43 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		response.Diagnostics.AddError("Unable to configure VEW pipeline client", "The VEW pipeline client could not be configured.")
 		return
 	}
+	imageExecuteTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/pipeline.execute")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW image build client", "The VEW image build execute client could not be configured.")
+		return
+	}
 	pipelineReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/pipeline.read")
 	if err != nil {
-		response.Diagnostics.AddError("Unable to configure VEW pipeline read client", "The VEW pipeline read client could not be configured.")
+		response.Diagnostics.AddError("Unable to configure VEW image build client", "The VEW image build read client could not be configured.")
 		return
+	}
+	var technologyAPI technologies.API
+	var projectAccountAPI projectaccounts.API
+	if config.ProjectAPIURL != "" {
+		projectsConfig := config
+		projectsConfig.APIURL = config.ProjectAPIURL
+		technologyWriteTransport, err := vew.NewTransportWithScopes(projectsConfig, "clients/projects/technology.write")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW technology client", "The VEW technology write client could not be configured.")
+			return
+		}
+		technologyReadTransport, err := vew.NewTransportWithScopes(projectsConfig, "clients/projects/technology.read")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW technology client", "The VEW technology read client could not be configured.")
+			return
+		}
+		accountWriteTransport, err := vew.NewTransportWithScopes(projectsConfig, "clients/projects/account.write")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW project account client", "The VEW project account write client could not be configured.")
+			return
+		}
+		accountReadTransport, err := vew.NewTransportWithScopes(projectsConfig, "clients/projects/account.read")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW project account client", "The VEW project account read client could not be configured.")
+			return
+		}
+		technologyAPI = technologies.NewClient(technologyWriteTransport, technologyReadTransport)
+		projectAccountAPI = projectaccounts.NewClient(accountWriteTransport, accountReadTransport)
 	}
 	api := components.NewClient(transport)
 	componentReadAPI := components.NewClient(componentReadTransport)
@@ -120,14 +160,19 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	recipeReleaseAPI := recipes.NewClient(recipeReleaseTransport)
 	pipelineAPI := pipelines.NewClient(pipelineTransport)
 	pipelineReadAPI := pipelines.NewClient(pipelineReadTransport)
-	imageReadAPI := images.NewClient(pipelineReadTransport)
+	imageAPI := images.NewClient(imageExecuteTransport, pipelineReadTransport)
+	imageReadAPI := images.NewClient(nil, pipelineReadTransport)
 	data := providerdata.Data{
 		Components:               api,
 		ComponentReads:           componentReadAPI,
 		ComponentVersions:        api,
 		ComponentVersionReads:    componentReadAPI,
 		ComponentVersionReleases: componentReleaseAPI,
+		Images:                   imageAPI,
 		ImageReads:               imageReadAPI,
+		ProjectAPIURL:            config.ProjectAPIURL,
+		Technologies:             technologyAPI,
+		ProjectAccounts:          projectAccountAPI,
 		Pipelines:                pipelineAPI,
 		PipelineReads:            pipelineReadAPI,
 		Recipes:                  recipeAPI,
@@ -175,8 +220,27 @@ func resolveProviderConfig(model providerModel, getenv func(string) (string, boo
 		}
 		field.setValue(&config, value)
 	}
+	// Projects resources use a separate API base, but it is optional so existing
+	// Packaging-only configurations continue to work. Projects resources can
+	// diagnose its absence before making a request when they are configured.
+	if model.ProjectsAPIURL.IsUnknown() {
+		diagnostics.AddError("Unknown provider configuration", "projects_api_url must be known; configure it explicitly or through VEW_PROJECTS_API_URL.")
+	} else {
+		projectsAPIURL := ""
+		if !model.ProjectsAPIURL.IsNull() {
+			projectsAPIURL = strings.TrimSpace(model.ProjectsAPIURL.ValueString())
+		}
+		if projectsAPIURL == "" {
+			projectsAPIURL, _ = getenv("VEW_PROJECTS_API_URL")
+			projectsAPIURL = strings.TrimSpace(projectsAPIURL)
+		}
+		config.ProjectAPIURL = projectsAPIURL
+	}
 	if config.APIURL != "" && !validHTTPURL(config.APIURL) {
 		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTP or HTTPS URL.")
+	}
+	if config.ProjectAPIURL != "" && !validHTTPURL(config.ProjectAPIURL) {
+		diagnostics.AddError("Invalid provider configuration", "projects_api_url must be an absolute HTTP or HTTPS URL.")
 	}
 	if config.TokenURL != "" && !validHTTPURL(config.TokenURL) {
 		diagnostics.AddError("Invalid provider configuration", "token_url must be an absolute HTTP or HTTPS URL.")
@@ -196,6 +260,8 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providerpipelines.NewPipelineResource,
 		providerrecipes.NewRecipeResource,
 		providerrecipes.NewRecipeVersionResource,
+		providertechnologies.NewTechnologyResource,
+		providerprojectaccounts.NewProjectAccountResource,
 	}
 }
 
@@ -216,5 +282,6 @@ func (p *vewProvider) Actions(context.Context) []func() action.Action {
 	return []func() action.Action{
 		providerreleaseactions.NewComponentVersionReleaseAction,
 		providerreleaseactions.NewRecipeVersionReleaseAction,
+		providerimageactions.NewImageBuildAction,
 	}
 }

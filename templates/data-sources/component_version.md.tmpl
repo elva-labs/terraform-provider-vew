@@ -1,0 +1,46 @@
+---
+page_title: "vew_component_version Data Source - VEW"
+subcategory: ""
+description: |-
+  Reads a component version using its project, parent component, and version identifiers. Retired, failed, and other returned terminal versions stay visible.
+---
+
+# vew_component_version data source
+
+Reads a component version using its project, parent component, and version
+identifiers. Retired, failed, and other returned terminal versions stay visible.
+
+Permission: project assignment and `clients/packaging/component.read`.
+
+## Selectors
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `component_id` | string | Required parent component identifier. |
+| `version_id` | string | Required exact component-version identifier. |
+
+## Computed attributes
+
+`description`, `definition_json`, `dependencies`, `software_vendor`,
+`software_version`, nullable `license_dashboard` and `notes`, `name`, `status`,
+`created_at`, `created_by`, `updated_at`, and `updated_by`. Each dependency
+contains `component_id`, `component_name`, `version_id`, `version_name`, `type`,
+`order`, and nullable `position`; the list follows dependency order. The
+definition is canonical JSON. VEW does not return create-time release type, so
+the data source has no `release_type` attribute. The full definition is stored
+in Terraform state and may be present in plans and state backups.
+
+```hcl
+data "vew_component_version" "existing" {
+  project_id   = var.project_id
+  component_id = var.component_id
+  version_id   = var.version_id
+}
+
+output "component_version_status" {
+  value = data.vew_component_version.existing.status
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}

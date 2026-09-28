@@ -1,0 +1,41 @@
+---
+page_title: "vew_pipeline Data Source - VEW"
+subcategory: ""
+description: |-
+  Reads one existing project-scoped pipeline, including readable terminal states. A missing exact pipeline is an error.
+---
+
+# vew_pipeline data source
+
+Reads one existing project-scoped pipeline, including readable terminal states.
+A missing exact pipeline is an error.
+
+Permission: project assignment and `clients/packaging/pipeline.read`.
+
+## Selectors
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `pipeline_id` | string | Required exact pipeline identifier. |
+
+## Computed attributes
+
+`name`, `description`, `recipe_id`, `recipe_name`, `recipe_version_id`,
+`recipe_version_name`, `build_instance_types`, `schedule`, nullable `product_id`,
+`status`, nullable `distribution_config_arn`,
+`infrastructure_config_arn`, `pipeline_arn`, `created_at`, `created_by`,
+`updated_at`, and `updated_by`.
+
+```hcl
+data "vew_pipeline" "existing" {
+  project_id  = var.project_id
+  pipeline_id = var.pipeline_id
+}
+
+output "pipeline_status" {
+  value = data.vew_pipeline.existing.status
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}

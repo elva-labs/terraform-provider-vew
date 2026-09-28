@@ -1,13 +1,14 @@
 # Terraform Provider for VEW
 
 This proof-of-concept Terraform provider manages VEW components, component
-versions, recipes, recipe versions, and image pipelines. It uses the VEW OAuth
-2.0 client-credentials flow and exposes the `vew_component`,
-`vew_component_version`, `vew_recipe`, `vew_recipe_version`, and `vew_pipeline`
-resources.
+versions, recipes, recipe versions, image pipelines, project technologies, and
+AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
+and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
+`vew_recipe_version`, `vew_pipeline`, `vew_technology`, and
+`vew_project_account` resources.
 
 It also provides read-only data sources for components, versions, recipes,
-pipelines, and images.
+pipelines, and images, plus an explicitly invoked image-build action.
 
 ## Prerequisites
 
@@ -21,13 +22,16 @@ attribute is omitted or empty:
 | Provider attribute | Environment variable | Description |
 | --- | --- | --- |
 | `api_url` | `VEW_API_URL` | Absolute VEW API HTTP(S) URL, including `/clients/packaging/v1` (the provider appends `/projects/...`) |
+| `projects_api_url` | `VEW_PROJECTS_API_URL` | Absolute VEW Projects API HTTP(S) URL (used by technologies and account assignments) |
 | `token_url` | `VEW_TOKEN_URL` | Absolute OAuth token HTTP(S) URL |
 | `client_id` | `VEW_CLIENT_ID` | OAuth client ID |
 | `client_secret` | `VEW_CLIENT_SECRET` | OAuth client secret (sensitive) |
 
-Explicit provider attributes take precedence over environment variables. All
-four values are required after fallback resolution. The provider configuration
-can therefore remain empty, as in
+Explicit provider attributes take precedence over environment variables. The
+packaging API URL, token URL, client ID, and client secret are required after
+fallback resolution. Configure the Projects API URL when using
+`vew_technology` or `vew_project_account`. The provider configuration can
+remain empty for resources that do not use the Projects API, as in
 [`examples/provider/provider.tf`](examples/provider/provider.tf):
 
 ```hcl
@@ -45,6 +49,16 @@ make fmt
 make test
 make build
 ```
+
+Registry pages in `docs/` are generated from the live provider schema and
+`templates/`. After changing a schema or a template, run `make docs` and
+commit the resulting pages. Run `make docs-check` to regenerate into a
+temporary directory, compare every page, and validate the Registry layout.
+The GitHub Actions workflow runs this check and `make test GO=go` on pull
+requests and pushes to `main`. It uses Terraform 1.16.3 and `tfplugindocs`
+v0.25.0. Live acceptance tests remain separately gated. The historical
+design notes live in `design/superpowers/` so `docs/` contains only Registry
+pages.
 
 The equivalent commands are:
 
@@ -140,6 +154,43 @@ variables, `VEW_TEST_PROJECT_ID`, and `VEW_TEST_COMPONENT_ID`,
 `VEW_TEST_RECIPE_VERSION_ID`, `VEW_TEST_PIPELINE_ID`, and
 `VEW_TEST_IMAGE_ID`, then run `make testacc-data-sources`. All IDs must belong
 to the supplied project. The test skips when any gate is missing.
+
+The image-build acceptance test invokes a real build, which may incur AWS
+charges. Set `TF_ACC=1`, `VEW_ACC_IMAGE_BUILD=1`, the four provider environment
+variables, `VEW_TEST_PROJECT_ID`, `VEW_TEST_PIPELINE_ID` for an existing
+disposable pipeline, and `VEW_TEST_IMAGE_IDEMPOTENCY_KEY` to an RFC 4122 UUID.
+Then run `make testacc-image-build`. The test invokes the action twice with the
+same key and checks that VEW returns the same image ID. It requires Terraform
+1.16.3 and skips when a gate is missing.
+
+The technology live acceptance test creates, updates, imports, and deletes a
+uniquely named disposable technology. It requires `TF_ACC=1`,
+`VEW_ACC_TECHNOLOGY=1`, all four provider environment variables,
+`VEW_PROJECTS_API_URL`, and `VEW_TEST_PROJECT_ID`, then runs with
+`make testacc-technology`. It needs a project assignment and the technology
+read and write scopes. It is skipped before API access when any gate is
+missing. To check the gate without contacting VEW, run
+`make testacc-technology TF_ACC= VEW_ACC_TECHNOLOGY=`.
+
+The project-account live acceptance test is gated separately because it starts
+real AWS onboarding. It requires `TF_ACC=1`, `VEW_ACC_PROJECT_ACCOUNT=1`, all
+four provider environment variables, `VEW_PROJECTS_API_URL`,
+`VEW_TEST_PROJECT_ID`, an existing `VEW_TEST_TECHNOLOGY_ID` in that project,
+`VEW_TEST_AWS_ACCOUNT_ID` containing exactly 12 digits,
+`VEW_TEST_ACCOUNT_TYPE` (`USER` or `TOOLCHAIN`),
+`VEW_TEST_ACCOUNT_STAGE` (`dev`, `qa`, or `prod`), and
+`VEW_TEST_ACCOUNT_REGION` (for example `eu-west-1`). It also requires the
+explicit confirmation `VEW_CONFIRM_AWS_ACCOUNT_SIDE_EFFECTS=I_CONFIRM_REAL_AWS_ONBOARDING`.
+Run it with `make testacc-project-account`. The account must be disposable and
+approved for VEW onboarding: the operation can create or change AWS resources
+and incur charges. The test imports the assignment and then deletes the
+Terraform resource, which deactivates the VEW assignment; it does not offboard
+the AWS account. VEW retains the assignment's technology reference. The live
+fixture is one-shot: use a new disposable AWS account for another run, because
+deactivation retains the VEW assignment record. Missing or invalid gates cause
+the test to skip before it requests a token or calls the API. To check its
+gate without contacting VEW, run
+`make testacc-project-account TF_ACC= VEW_ACC_PROJECT_ACCOUNT= VEW_CONFIRM_AWS_ACCOUNT_SIDE_EFFECTS=`.
 
 ## Local Terraform development override
 
@@ -378,9 +429,9 @@ terraform import vew_recipe_version.example prog-73488/recipe-123/version-456
 
 VEW releases are one-way operations, so they are separate provider actions and
 never happen as a side effect of creating or updating a version resource. The
-[`vew_component_version_release`](docs/actions/vew_component_version_release.md)
+[`vew_component_version_release`](docs/actions/component_version_release.md)
 action releases a validated component version, and the
-[`vew_recipe_version_release`](docs/actions/vew_recipe_version_release.md)
+[`vew_recipe_version_release`](docs/actions/recipe_version_release.md)
 action releases a validated recipe version. The caller must have the
 corresponding VEW release permission and access to the specified project.
 
@@ -486,6 +537,42 @@ Terraform records the returned ID; the same idempotency key is reused for
 transport retries within that attempt, but not across a later Terraform run.
 Inspect VEW before retrying after such a crash to avoid creating a duplicate.
 
+## Projects API resources
+
+The `vew_technology` and `vew_project_account` resources use the Projects API
+URL from `projects_api_url` or `VEW_PROJECTS_API_URL`. Both need an active
+assignment to the project. Technology management needs
+`clients/projects/technology.read` and
+`clients/projects/technology.write`; project-account management needs
+`clients/projects/account.read` and `clients/projects/account.write`.
+
+`vew_technology` manages a project's technology catalog entry. Import IDs are
+`project_id/technology_id`. VEW can reject technology deletion while any
+retained account assignment refers to it, even after that assignment has been
+deactivated. Resolve the account reference through VEW before deleting the
+technology. Add `lifecycle { prevent_destroy = true }` when Terraform must
+block a planned deletion or replacement.
+
+`vew_project_account` associates a project's technology, stage, and AWS region
+with a 12-digit AWS account ID. Its account type is `USER` or `TOOLCHAIN`; its
+stage is `dev`, `qa`, or `prod`. Import IDs are `project_id/account_id`.
+Creating and updating starts asynchronous onboarding or re-onboarding. Terraform
+polls for completion for up to two hours by default, configurable with
+`timeouts.create` and `timeouts.update`. After deactivation, creating the
+assignment again for the same project and AWS account makes VEW reuse the
+inactive assignment's internal ID and start onboarding again.
+
+Removing a project-account resource deactivates its VEW assignment. This does
+not remove the AWS account, undo onboarding, or offboard AWS resources. VEW
+retains the account's technology reference after deactivation. Onboarding
+changes the real AWS account and can incur charges, so use only an explicitly
+approved disposable account. Add `lifecycle { prevent_destroy = true }` to
+block a planned deletion or replacement while the assignment needs to remain
+active. Examples are in
+[`examples/resources/vew_technology/resource.tf`](examples/resources/vew_technology/resource.tf)
+and
+[`examples/resources/vew_project_account/resource.tf`](examples/resources/vew_project_account/resource.tf).
+
 ## Data sources
 
 The provider reads existing components, component versions, recipes, recipe
@@ -500,6 +587,35 @@ See the [data-source guide](docs/guides/data-sources.md) for scope and behavior
 details and the [example](examples/data-sources/README.md) for all eight
 data sources. Image build progress is not available as a structured Terraform
 value; read a known image ID or refresh `vew_images` after the build.
+
+## Image build action
+
+`vew_image_build` explicitly starts a build for an existing pipeline and waits
+for it to finish. A normal plan or apply does not invoke it. The action needs
+the pipeline execute and read scopes, and a caller-supplied UUID
+`idempotency_key` to recover the same logical build after an interruption.
+Builds may incur AWS charges.
+
+See the [action guide](docs/actions/image_build.md) for invocation, timeout,
+and retry behavior and the [runnable example](examples/actions/image-build/README.md).
+
+## Release from main
+
+The [release workflow](.github/workflows/release.yml) builds signed Terraform
+Registry assets from the current `main` commit. After the checks on `main`
+pass, start **Release provider** in GitHub Actions on the `main` branch and
+enter a new SemVer tag such as `v0.1.0`. The workflow reruns tests and the docs
+check, creates the tag on that commit, then uses GoReleaser to publish a GitHub
+Release. It will not release a commit from another branch. Do not move or
+replace a published version tag; release a new version for corrections.
+
+Before the first run, configure repository Actions secrets `GPG_PRIVATE_KEY`
+and `PASSPHRASE` for an RSA or DSA release-signing key. Keep the private key
+outside the repository. Add the matching public key to the Terraform Registry
+account that will publish the provider. The manifest declares Terraform plugin
+protocol 6.0. After the first signed GitHub Release exists, publish the
+provider through the Terraform Registry UI; later releases are discovered by
+its GitHub webhook.
 
 ## Domain package layout
 

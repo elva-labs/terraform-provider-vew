@@ -1,0 +1,42 @@
+---
+page_title: "vew_image Data Source - VEW"
+subcategory: ""
+description: |-
+  Reads an existing image by exact ID. Terminal image states stay visible. A missing image is an error.
+---
+
+# vew_image data source
+
+Reads an existing image by exact ID. Terminal image states stay visible. A
+missing image is an error.
+
+Permission: project assignment and `clients/packaging/pipeline.read`.
+
+## Selectors
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `image_id` | string | Required exact image identifier. |
+
+## Computed attributes
+
+`pipeline_id`, `status`, and nullable `image_upstream_id`. A null upstream ID
+stays null; it is not replaced with an empty string.
+
+```hcl
+data "vew_image" "existing" {
+  project_id = var.project_id
+  image_id   = var.image_id
+}
+
+output "upstream_image_id" {
+  value = data.vew_image.existing.image_upstream_id
+}
+```
+
+This data source cannot consume `vew_image_build` progress as a structured
+value during the same action invocation. Use an explicit known ID or
+`vew_images` on a later refresh.
+
+{{ .SchemaMarkdown | trimspace }}

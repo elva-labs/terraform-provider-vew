@@ -4,3 +4,5 @@
 *.tfstate.*
 terraform.rc
 /terraform-provider-vew
+.registry-docs-*/
+/dist/

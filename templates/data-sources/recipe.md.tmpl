@@ -1,0 +1,39 @@
+---
+page_title: "vew_recipe Data Source - VEW"
+subcategory: ""
+description: |-
+  Reads one existing project-scoped recipe. Archived recipes remain visible when VEW returns them; the data source never imports or changes a recipe.
+---
+
+# vew_recipe data source
+
+Reads one existing project-scoped recipe. Archived recipes remain visible when
+VEW returns them; the data source never imports or changes a recipe.
+
+Permission: project assignment and `clients/packaging/recipe.read`.
+
+## Selectors
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `recipe_id` | string | Required exact recipe identifier. |
+
+## Computed attributes
+
+`name`, `description`, `platform`, `architecture`, `os_version`, `status`,
+`created_at`, `created_by`, `updated_at`, and `updated_by`. A missing exact
+recipe produces an error.
+
+```hcl
+data "vew_recipe" "existing" {
+  project_id = var.project_id
+  recipe_id  = var.recipe_id
+}
+
+output "recipe_status" {
+  value = data.vew_recipe.existing.status
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}

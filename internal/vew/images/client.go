@@ -11,21 +11,29 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 )
 
+// API is the image-build surface used by the Terraform action.
+type API interface {
+	BuildImage(context.Context, string, string, string) (ActionResult, error)
+	GetImage(context.Context, string, string) (Image, error)
+}
+
 // ReadAPI is the least-privilege image surface used by data sources.
 type ReadAPI interface {
 	GetImage(context.Context, string, string) (Image, error)
 	ListImages(context.Context, string) ([]Image, error)
 }
 
-// Client reads image state through a pipeline-read-scoped transport.
+// Client keeps execute and read OAuth transports separate.
 type Client struct {
-	read *vew.Transport
+	execute *vew.Transport
+	read    *vew.Transport
 }
 
+var _ API = (*Client)(nil)
 var _ ReadAPI = (*Client)(nil)
 
-func NewClient(read *vew.Transport) *Client {
-	return &Client{read: read}
+func NewClient(execute, read *vew.Transport) *Client {
+	return &Client{execute: execute, read: read}
 }
 
 func imageSegments(projectID, imageID string, item bool) ([]string, error) {
@@ -40,6 +48,38 @@ func imageSegments(projectID, imageID string, item bool) ([]string, error) {
 		segments = append(segments, imageID)
 	}
 	return segments, nil
+}
+
+// BuildImage starts one pipeline build. The caller owns the idempotency key so
+// the same key can be reused across action-level recovery attempts.
+func (c *Client) BuildImage(ctx context.Context, projectID, pipelineID, idempotencyKey string) (ActionResult, error) {
+	segments, err := imageSegments(projectID, "", false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	if strings.TrimSpace(pipelineID) == "" {
+		return ActionResult{}, errors.New("VEW pipeline ID must not be empty")
+	}
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return ActionResult{}, errors.New("VEW image build idempotency key must not be empty")
+	}
+	body, err := json.Marshal(struct {
+		PipelineID string `json:"pipelineId"`
+	}{PipelineID: pipelineID})
+	if err != nil {
+		return ActionResult{}, errors.New("VEW image build request could not be encoded")
+	}
+	response, headers, err := c.execute.Do(ctx, http.MethodPost, segments, body, idempotencyKey)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	var envelope struct {
+		ID string `json:"imageId"`
+	}
+	if json.Unmarshal(response, &envelope) != nil || strings.TrimSpace(envelope.ID) == "" {
+		return ActionResult{}, errors.New("VEW image build response missing image ID")
+	}
+	return ActionResult{ID: envelope.ID, RetryAfter: vew.RetryAfter(headers, time.Now())}, nil
 }
 
 // GetImage reads one image build through the read-scoped transport.

@@ -1,11 +1,13 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -28,15 +30,136 @@ func imageToken(w http.ResponseWriter, request *http.Request) bool {
 	if request.URL.Path != "/oauth/token" {
 		return false
 	}
-	if request.FormValue("scope") != "clients/packaging/pipeline.read" {
+	if request.FormValue("scope") != "clients/packaging/pipeline.execute" && request.FormValue("scope") != "clients/packaging/pipeline.read" {
 		panic("unexpected OAuth scope " + request.FormValue("scope"))
 	}
 	_, _ = io.WriteString(w, `{"access_token":"`+request.FormValue("scope")+`","expires_in":3600}`)
 	return true
 }
 
+func TestBuildImageUsesExecuteScopeAndExactRequest(t *testing.T) {
+	const key = "caller-owned-key"
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if imageToken(w, request) {
+			return
+		}
+		calls++
+		if request.Method != http.MethodPost || request.URL.EscapedPath() != "/projects/project%2Fone/images" {
+			t.Errorf("request = %s %s", request.Method, request.URL.EscapedPath())
+		}
+		if request.Header.Get("Authorization") != "Bearer clients/packaging/pipeline.execute" || request.Header.Get("Idempotency-Key") != key {
+			t.Errorf("headers = %#v", request.Header)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil || !bytes.Equal(body, []byte(`{"pipelineId":"pipeline/one"}`)) {
+			t.Errorf("body = %q, %v", body, err)
+		}
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"imageId":"image-one"}`)
+	}))
+	defer server.Close()
+	client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+	result, err := client.BuildImage(context.Background(), "project/one", "pipeline/one", key)
+	if err != nil || result.ID != "image-one" || result.RetryAfter != 7*time.Second || calls != 1 {
+		t.Fatalf("build = %#v, %v; calls=%d", result, err, calls)
+	}
+}
+
+func TestBuildImageReusesKeyAndBodyAfterLostResponse(t *testing.T) {
+	var keys []string
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if imageToken(w, request) {
+			return
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		keys, bodies = append(keys, request.Header.Get("Idempotency-Key")), append(bodies, body)
+		if len(keys) == 1 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"imageId":"image-one"}`)
+	}))
+	defer server.Close()
+	client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+	result, err := client.BuildImage(context.Background(), "project", "pipeline", "stable-key")
+	if err != nil || result.ID != "image-one" {
+		t.Fatalf("build = %#v, %v", result, err)
+	}
+	if !reflect.DeepEqual(keys, []string{"stable-key", "stable-key"}) || len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("retries used keys %q and bodies %q", keys, bodies)
+	}
+}
+
+func TestBuildImageRetriesInProgressWithSameRequest(t *testing.T) {
+	var keys []string
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if imageToken(w, request) {
+			return
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		keys, bodies = append(keys, request.Header.Get("Idempotency-Key")), append(bodies, body)
+		if len(keys) == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"code":"IDEMPOTENCY_REQUEST_IN_PROGRESS"}`)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"imageId":"image-one"}`)
+	}))
+	defer server.Close()
+	client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+	result, err := client.BuildImage(context.Background(), "project", "pipeline", "stable-key")
+	if err != nil || result.ID != "image-one" {
+		t.Fatalf("build = %#v, %v", result, err)
+	}
+	if !reflect.DeepEqual(keys, []string{"stable-key", "stable-key"}) || len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("retries used keys %q and bodies %q", keys, bodies)
+	}
+}
+
+func TestBuildImageRejectsMissingInputAndMalformedResponse(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if imageToken(w, request) {
+			return
+		}
+		calls++
+		_, _ = io.WriteString(w, `{"imageId":""}`)
+	}))
+	defer server.Close()
+	client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+	for _, args := range [][3]string{{"", "pipeline", "key"}, {"project", "", "key"}, {"project", "pipeline", ""}} {
+		if _, err := client.BuildImage(context.Background(), args[0], args[1], args[2]); err == nil {
+			t.Fatalf("BuildImage%q accepted invalid input", args)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid requests reached API: %d", calls)
+	}
+	if _, err := client.BuildImage(context.Background(), "project", "pipeline", "key"); err == nil || !strings.Contains(err.Error(), "missing image ID") {
+		t.Fatalf("malformed response error = %v", err)
+	}
+}
+
 func TestGetImageRejectsMissingInputWithoutRequest(t *testing.T) {
-	client := NewClient(nil)
+	client := NewClient(nil, nil)
 	if _, err := client.GetImage(context.Background(), "", "image"); err == nil {
 		t.Fatal("accepted empty project ID")
 	}
@@ -75,7 +198,7 @@ func TestGetImageUsesReadScopeAndDecodesStatuses(t *testing.T) {
 				_, _ = io.WriteString(w, `{"image":{"projectId":"project/one","imageId":"image/one","pipelineId":"pipe-one","status":"`+tc.status+`","imageUpstreamId":`+upstreamJSON+`}}`)
 			}))
 			defer server.Close()
-			client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+			client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
 			image, err := client.GetImage(context.Background(), "project/one", "image/one")
 			if err != nil || image.ProjectID != "project/one" || image.ID != "image/one" || image.PipelineID != "pipe-one" || image.Status != tc.status || image.RetryAfter != 3*time.Second {
 				t.Fatalf("image = %#v, %v", image, err)
@@ -107,7 +230,7 @@ func TestGetImagePreservesAPIErrorAndRejectsMalformedEnvelope(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+			client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.execute"), imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
 			_, err := client.GetImage(context.Background(), "project", "image")
 			if err == nil {
 				t.Fatal("expected error")
@@ -144,7 +267,7 @@ func TestListImagesReadScopeAndDecode(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, body)
 		}))
-		client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+		client := NewClient(nil, imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
 		images, err := client.ListImages(context.Background(), "project")
 		server.Close()
 		if err != nil {
@@ -167,14 +290,14 @@ func TestListImagesRejectsMalformedEnvelopeAndImage(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, body)
 		}))
-		client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+		client := NewClient(nil, imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
 		_, err := client.ListImages(context.Background(), "project")
 		server.Close()
 		if err == nil {
 			t.Fatalf("accepted malformed list response %q", body)
 		}
 	}
-	if _, err := NewClient(nil).ListImages(context.Background(), " "); err == nil {
+	if _, err := NewClient(nil, nil).ListImages(context.Background(), " "); err == nil {
 		t.Fatal("accepted empty project ID")
 	}
 }
@@ -199,7 +322,7 @@ func TestListImagesPreservesAPIErrorMetadata(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			client := NewClient(imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
+			client := NewClient(nil, imageTestTransport(t, server.URL, "clients/packaging/pipeline.read"))
 			_, err := client.ListImages(context.Background(), "project")
 			var apiErr *vew.APIError
 			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Problem.Code != tc.code || apiErr.Problem.RequestID != tc.requestID {

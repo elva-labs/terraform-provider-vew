@@ -1,0 +1,29 @@
+---
+page_title: "vew_recipe_version Resource - VEW"
+subcategory: ""
+description: |-
+  Manages and validates a VEW recipe version.
+---
+
+# vew_recipe_version (Resource)
+
+Creates and updates a recipe version and waits for VEW validation. Release is
+an explicit `vew_recipe_version_release` action. Terraform delete retires the
+version. `configured_components` preserves the selected component versions;
+`effective_components` reflects VEW's resolved selection.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing version with `project_id/recipe_id/version_id`:
+
+```shell
+terraform import vew_recipe_version.example prog-73488/recipe-123/version-456
+```
+
+VEW does not return the original `release_type`. Omit it when importing.

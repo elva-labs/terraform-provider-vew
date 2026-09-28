@@ -1,0 +1,34 @@
+---
+page_title: "VEW Provider"
+description: |-
+  Manage VEW components, recipes, and pipelines with Terraform.
+---
+
+# VEW Provider
+
+The VEW provider manages components, component versions, recipes, recipe
+versions, image pipelines, project technologies, and project AWS account
+assignments. It also reads existing project objects and offers explicit
+actions for releasing versions and building images.
+
+Provider configuration accepts OAuth client credentials in the arguments below
+or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`, `VEW_TOKEN_URL`,
+`VEW_CLIENT_ID`, and `VEW_CLIENT_SECRET` environment variables. `api_url`
+includes `/clients/packaging/v1`; `projects_api_url` points to the Projects
+API endpoint. The caller also needs an active assignment to the VEW project
+and the scopes required by each operation. Technologies need
+`clients/projects/technology.read` and
+`clients/projects/technology.write`; project account assignments need
+`clients/projects/account.read` and `clients/projects/account.write`.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+See the [data source guide](guides/data-sources.md) for read scopes and behavior.
+Project accounts onboard asynchronously and may wait up to two hours by
+default. Deleting one deactivates its VEW assignment and does not offboard the
+AWS account. Actions must be invoked explicitly; declaring them does not mutate
+VEW.

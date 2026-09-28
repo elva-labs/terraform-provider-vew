@@ -1,0 +1,27 @@
+---
+page_title: "vew_pipeline Resource - VEW"
+subcategory: ""
+description: |-
+  Manages a VEW image pipeline without starting a build.
+---
+
+# vew_pipeline (Resource)
+
+Manages an image pipeline using a released recipe version. Create and update
+wait for VEW to report `CREATED`; delete retires the pipeline. Configuring a
+pipeline does not build an image. Invoke `vew_image_build` separately when a
+build is intended.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing pipeline with `project_id/pipeline_id`:
+
+```shell
+terraform import vew_pipeline.example prog-73488/pipeline-123
+```

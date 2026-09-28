@@ -1,0 +1,46 @@
+---
+page_title: "vew_images Data Source - VEW"
+subcategory: ""
+description: |-
+  Lists project images, with optional filters. Results are sorted by ascending `image_id`; no matches produce an empty list. Terminal images remain visible.
+---
+
+# vew_images data source
+
+Lists project images, with optional filters. Results are sorted by ascending
+`image_id`; no matches produce an empty list. Terminal images remain visible.
+
+Permission: project assignment and `clients/packaging/pipeline.read`.
+
+## Selectors and filters
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `pipeline_id` | string | Optional nonempty pipeline ID filter. |
+| `status` | string | Optional exact lifecycle status: `CREATING`, `CREATED`, `FAILED`, `RETIRED`, or `DELETED`. |
+
+## Computed attributes
+
+`images` is a list of objects with `project_id`, `image_id`, `pipeline_id`,
+`status`, and nullable `image_upstream_id`. The upstream ID remains null when
+VEW does not provide one.
+
+```hcl
+data "vew_images" "created_for_pipeline" {
+  project_id  = var.project_id
+  pipeline_id = var.pipeline_id
+  status      = "CREATED"
+}
+
+output "image_ids" {
+  value = [for image in data.vew_images.created_for_pipeline.images : image.image_id]
+}
+```
+
+There is no “latest image” selector: ascending ID order is deterministic, not a
+recency guarantee. The image-build action only emits progress and cannot feed a
+structured result into HCL during the same invocation. Query by a known ID or
+use this collection on a later refresh.
+
+{{ .SchemaMarkdown | trimspace }}

@@ -1,0 +1,30 @@
+---
+page_title: "vew_component_version Resource - VEW"
+subcategory: ""
+description: |-
+  Manages and validates a VEW component version.
+---
+
+# vew_component_version (Resource)
+
+Creates and updates a component version, then waits for VEW validation.
+Releasing a validated version is a separate `vew_component_version_release`
+action. Terraform delete retires the version. The full `definition_json` is
+stored in Terraform state, so secure state and plan files accordingly.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing version with `project_id/component_id/version_id`:
+
+```shell
+terraform import vew_component_version.example prog-73488/cmp-123/version-456
+```
+
+VEW does not return the original `release_type`. Omit that argument when
+importing an existing version.

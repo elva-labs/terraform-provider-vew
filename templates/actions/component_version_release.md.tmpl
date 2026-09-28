@@ -1,3 +1,10 @@
+---
+page_title: "vew_component_version_release Action - VEW"
+subcategory: ""
+description: |-
+  Releases one validated VEW component version. This action performs a one-way VEW operation and does not create, update, or delete Terraform state.
+---
+
 # vew_component_version_release action
 
 Releases one validated VEW component version. This action performs a one-way
@@ -99,3 +106,5 @@ terraform apply -invoke=action.vew_component_version_release.retry
 Do not use `after_update` for this one-way action. The provider does not impose
 a two-invocation limit; VEW determines whether another release request is
 valid.
+
+{{ .SchemaMarkdown | trimspace }}

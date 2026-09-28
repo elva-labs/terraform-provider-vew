@@ -59,7 +59,7 @@ terraform-provider-vew/
 ├── examples/
 │   ├── provider/provider.tf
 │   └── resources/vew_component/resource.tf
-├── docs/superpowers/specs/
+├── design/superpowers/specs/
 ├── .gitignore
 ├── LICENSE
 ├── Makefile

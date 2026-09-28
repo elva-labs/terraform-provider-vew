@@ -1,0 +1,36 @@
+---
+page_title: "vew_technology Resource - VEW"
+subcategory: ""
+description: |-
+  Manages a VEW technology in a project.
+---
+
+# vew_technology (Resource)
+
+Manages a project technology through the Projects API. The provider must be
+configured with `projects_api_url` or `VEW_PROJECTS_API_URL`; the caller needs
+an active assignment to the project and the `clients/projects/technology.read`
+and `clients/projects/technology.write` scopes. Changes to `project_id` require
+replacement. Changes to `name` and `description` update the existing
+technology in place. Terraform deletes the technology when the resource is
+removed.
+
+VEW retains project account references after an account assignment is
+deactivated. If any retained account still references a technology, VEW rejects
+technology deletion. Resolve that association through VEW before deleting the
+technology. Use `lifecycle { prevent_destroy = true }` when Terraform should
+refuse planned deletion or replacement.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing technology with `project_id/technology_id`:
+
+```shell
+terraform import vew_technology.example prog-73488/tech-123
+```

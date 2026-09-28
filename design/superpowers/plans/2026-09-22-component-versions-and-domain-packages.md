@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.0, Terraform 1.16.x, Terraform Plugin Framework v1.19.0, Terraform Plugin Testing v1.16.0, Terraform protocol 6, and the Go standard library.
 
-**Spec:** `docs/superpowers/specs/2026-09-22-component-versions-and-domain-packages-design.md`
+**Spec:** `design/superpowers/specs/2026-09-22-component-versions-and-domain-packages-design.md`
 
 ## Global Constraints
 

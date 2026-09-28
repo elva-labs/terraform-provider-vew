@@ -5,7 +5,9 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
 )
 
 // Data is shared by provider resources and data sources.
@@ -15,7 +17,11 @@ type Data struct {
 	ComponentVersions        components.ComponentVersionAPI
 	ComponentVersionReads    components.ComponentVersionReadAPI
 	ComponentVersionReleases components.ComponentVersionReleaseAPI
+	Images                   images.API
 	ImageReads               images.ReadAPI
+	ProjectAPIURL            string
+	Technologies             technologies.API
+	ProjectAccounts          projectaccounts.API
 	Pipelines                pipelines.API
 	PipelineReads            pipelines.ReadAPI
 	Recipes                  recipes.RecipeAPI

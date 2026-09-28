@@ -1,0 +1,26 @@
+---
+page_title: "vew_recipe Resource - VEW"
+subcategory: ""
+description: |-
+  Manages a VEW recipe in a project.
+---
+
+# vew_recipe (Resource)
+
+Manages a project recipe. Terraform updates its description in place and
+archives it when the resource is deleted. Changes to its identifying and
+platform fields require replacement.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing recipe with `project_id/recipe_id`:
+
+```shell
+terraform import vew_recipe.example prog-73488/recipe-123
+```

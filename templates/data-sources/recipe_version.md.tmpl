@@ -1,0 +1,46 @@
+---
+page_title: "vew_recipe_version Data Source - VEW"
+subcategory: ""
+description: |-
+  Reads a recipe version under an explicit project and parent recipe. Retired, failed, and other returned terminal versions remain visible.
+---
+
+# vew_recipe_version data source
+
+Reads a recipe version under an explicit project and parent recipe. Retired,
+failed, and other returned terminal versions remain visible.
+
+Permission: project assignment and `clients/packaging/recipe.read`.
+
+## Selectors
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_id` | string | Required VEW project identifier. |
+| `recipe_id` | string | Required parent recipe identifier. |
+| `version_id` | string | Required exact recipe-version identifier. |
+
+## Computed attributes
+
+`description`, `volume_size`, `integrations`, `configured_components`,
+`effective_components`, `name`, `status`, `created_at`, `created_by`,
+`updated_at`, and `updated_by`. Each component selection includes
+`component_id`, `component_name`, `version_id`, `version_name`, `type`, and
+`order`; remote order is preserved. `configured_components` is null when VEW
+does not return historical configuration intent, and is an empty list when VEW
+explicitly returns no configured selections. `effective_components` reports
+the effective selection. Release type is not returned by VEW.
+
+```hcl
+data "vew_recipe_version" "existing" {
+  project_id = var.project_id
+  recipe_id  = var.recipe_id
+  version_id = var.version_id
+}
+
+output "effective_components" {
+  value = data.vew_recipe_version.existing.effective_components
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}

@@ -1,0 +1,26 @@
+---
+page_title: "vew_component Resource - VEW"
+subcategory: ""
+description: |-
+  Manages a VEW component in a project.
+---
+
+# vew_component (Resource)
+
+Manages a project component. Terraform updates its description in place;
+changes to its name, platform, architecture, or OS versions replace it.
+Deleting this resource archives the component in VEW.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing component with `project_id/component_id`:
+
+```shell
+terraform import vew_component.example prog-73488/cmp-123
+```

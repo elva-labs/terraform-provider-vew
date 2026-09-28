@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.0, Terraform 1.16.3, Terraform Plugin Framework v1.19.0, Terraform Plugin Testing v1.16.0, and the Go standard library.
 
-**Spec:** docs/superpowers/specs/2026-09-21-vew-component-provider-design.md
+**Spec:** design/superpowers/specs/2026-09-21-vew-component-provider-design.md
 
 ## Global Constraints
 

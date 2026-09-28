@@ -1,0 +1,66 @@
+---
+page_title: "vew_image_build Action - VEW"
+subcategory: ""
+description: |-
+  Starts one VEW image build for an existing pipeline, then waits for the image to finish. Building an image may incur AWS charges. Declare the action and invoke it explicitly when y.
+---
+
+# vew_image_build action
+
+Starts one VEW image build for an existing pipeline, then waits for the image to
+finish. Building an image may incur AWS charges. Declare the action and invoke it
+explicitly when you intend to build; ordinary `terraform plan` and `terraform
+apply` do not invoke a declared action.
+
+## Configuration
+
+| Attribute | Description |
+| --- | --- |
+| `project_id` | Project that owns the pipeline. Required. |
+| `pipeline_id` | Existing pipeline to execute. Required. |
+| `idempotency_key` | Caller-chosen RFC 4122 UUID for this logical build. Required. |
+| `timeout_minutes` | Positive wait limit. Optional; defaults to 120 minutes. |
+
+The client needs project assignment and the `clients/packaging/pipeline.execute`
+scope to submit the build, plus `clients/packaging/pipeline.read` to poll it.
+Pipeline write permission is not required for this action.
+
+## Direct invocation
+
+```hcl
+action "vew_image_build" "example" {
+  config {
+    project_id       = "your-project-id"
+    pipeline_id      = "your-existing-pipeline-id"
+    idempotency_key  = "90827b61-8399-4d8a-9843-d75d1556fed0"
+    timeout_minutes  = 120
+  }
+}
+```
+
+```shell
+terraform init
+terraform apply -invoke=action.vew_image_build.example
+```
+
+An invocation plan contains the action, not other pending resource changes.
+The action reports the reserved VEW `imageId`, lifecycle transitions, and final
+`imageUpstreamId` through Terraform progress messages. These are informational:
+actions have no structured result or Terraform state that HCL expressions can
+reference. Removing the action declaration makes no image API mutation and does
+not undo an accepted build.
+
+Keep the same `idempotency_key` in configuration after an interruption or
+timeout and invoke again to recover the same logical build while VEW retains its
+idempotency record. VEW retains completed replays for **at least 24 hours**;
+reusing the key after that boundary is not guaranteed to prevent another build.
+Choose a **new UUID key** only when you intentionally want another build.
+Reusing one key with a different pipeline request can fail with a conflict.
+
+The default wait is two hours. Set a larger positive `timeout_minutes` when a
+pipeline can take longer; a timeout does not cancel an already accepted build.
+Keep the key and invoke again to resume observation within the replay window.
+Do not attach this action to `after_update`: editing a pipeline is not an
+instruction to start another billable image build.
+
+{{ .SchemaMarkdown | trimspace }}
