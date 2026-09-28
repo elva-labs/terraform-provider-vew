@@ -255,6 +255,7 @@ func TestOAuthTokenSourceValidatesConfiguration(t *testing.T) {
 		{"empty endpoint", "", "id", "secret"},
 		{"relative endpoint", "/token", "id", "secret"},
 		{"ftp endpoint", "ftp://example.com/token", "id", "secret"},
+		{"remote plaintext endpoint", "http://example.com/token", "id", "secret"},
 		{"empty id", "https://example.com/token", "", "secret"},
 		{"empty secret", "https://example.com/token", "id", ""},
 	} {
@@ -263,6 +264,37 @@ func TestOAuthTokenSourceValidatesConfiguration(t *testing.T) {
 				t.Fatal("expected configuration error")
 			}
 		})
+	}
+}
+
+func TestOAuthTokenSourceAllowsLoopbackHTTP(t *testing.T) {
+	source, err := NewOAuthTokenSource("http://127.0.0.1/token", "id", "secret", nil)
+	if err != nil || source == nil {
+		t.Fatalf("NewOAuthTokenSource() = %#v, %v", source, err)
+	}
+}
+
+func TestOAuthTokenSourceRejectsCrossOriginRedirect(t *testing.T) {
+	targetCalls := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "stolen", "expires_in": 120})
+	}))
+	defer target.Close()
+	sourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer sourceServer.Close()
+
+	source, err := NewOAuthTokenSource(sourceServer.URL, "id", "secret", sourceServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Token(context.Background(), false); err == nil {
+		t.Fatal("cross-origin token redirect was followed")
+	}
+	if targetCalls != 0 {
+		t.Fatalf("redirect target calls = %d, want 0", targetCalls)
 	}
 }
 
