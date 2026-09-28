@@ -162,10 +162,10 @@ func componentAPIDiagnostic(operation string, err error) string {
 		return message
 	}
 	parts := []string{fmt.Sprintf("HTTP status %d", apiError.Status)}
-	if code := strings.TrimSpace(apiError.Problem.Code); code != "" {
+	if code := apiError.Problem.Code; safeComponentIdentifier.MatchString(code) {
 		parts = append(parts, "problem code "+code)
 	}
-	if requestID := strings.TrimSpace(apiError.Problem.RequestID); requestID != "" {
+	if requestID := apiError.Problem.RequestID; safeComponentIdentifier.MatchString(requestID) {
 		parts = append(parts, "request ID "+requestID)
 	}
 	return message + " (" + strings.Join(parts, ", ") + ")"
