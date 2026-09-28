@@ -11,6 +11,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/hashicorp/terraform-plugin-framework/action"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -177,6 +178,9 @@ func TestProviderConfigureSetsProviderData(t *testing.T) {
 	if data.ComponentVersions == nil || data.Pipelines == nil || data.Recipes == nil || data.RecipeVersions == nil || data.Waiter == nil {
 		t.Fatalf("expected ResourceData to include version APIs, pipeline API, recipe API, and waiter, got %#v", data)
 	}
+	if data.ComponentReads == nil || data.ComponentVersionReads == nil || data.ImageReads == nil || data.PipelineReads == nil || data.RecipeReads == nil || data.RecipeVersionReads == nil {
+		t.Fatalf("expected DataSourceData to include every narrow read API, got %#v", data)
+	}
 	if data.ComponentVersionReleases == nil || data.RecipeVersionReleases == nil {
 		t.Fatalf("expected ResourceData to include release APIs, got %#v", data)
 	}
@@ -283,6 +287,81 @@ func TestProviderPipelineUsesOnlyPipelineScopes(t *testing.T) {
 	}
 }
 
+func TestProviderDataSourcesUseOnlyDomainReadScopes(t *testing.T) {
+	var requestedScopes []string
+	var apiRequests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth/token":
+			if err := request.ParseForm(); err != nil {
+				t.Errorf("parse token form: %v", err)
+				return
+			}
+			requestedScopes = append(requestedScopes, request.Form.Get("scope"))
+			_, _ = fmt.Fprint(w, `{"access_token":"test-token","expires_in":3600}`)
+		case "/api/projects/project-1/components/component-1":
+			apiRequests = append(apiRequests, request.Method+" "+request.URL.Path)
+			_, _ = fmt.Fprint(w, `{"component":{"componentId":"component-1","status":"ARCHIVED"}}`)
+		case "/api/projects/project-1/recipes/recipe-1":
+			apiRequests = append(apiRequests, request.Method+" "+request.URL.Path)
+			_, _ = fmt.Fprint(w, `{"recipe":{"recipeId":"recipe-1","status":"ARCHIVED"}}`)
+		case "/api/projects/project-1/pipelines/pipeline-1":
+			apiRequests = append(apiRequests, request.Method+" "+request.URL.Path)
+			_, _ = fmt.Fprint(w, `{"pipeline":{"projectId":"project-1","pipelineId":"pipeline-1","status":"RETIRED"}}`)
+		case "/api/projects/project-1/images":
+			apiRequests = append(apiRequests, request.Method+" "+request.URL.Path)
+			_, _ = fmt.Fprint(w, `{"images":[]}`)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	p := New("test")()
+	var schemaResponse provider.SchemaResponse
+	p.Schema(context.Background(), provider.SchemaRequest{}, &schemaResponse)
+	request := provider.ConfigureRequest{Config: tfsdk.Config{
+		Schema: schemaResponse.Schema,
+		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
+			"api_url":       tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"token_url":     tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":     tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret": tftypes.NewValue(tftypes.String, "test-secret"),
+		})}}
+	var response provider.ConfigureResponse
+	p.Configure(context.Background(), request, &response)
+	assertNoDiagnostics(t, response.Diagnostics)
+	if len(requestedScopes) != 0 || len(apiRequests) != 0 {
+		t.Fatalf("provider configuration made network calls: scopes=%q requests=%q", requestedScopes, apiRequests)
+	}
+	data := response.DataSourceData.(providerdata.Data)
+	if _, err := data.ComponentReads.GetComponent(context.Background(), "project-1", "component-1"); err != nil {
+		t.Fatalf("read component: %v", err)
+	}
+	if _, err := data.RecipeReads.GetRecipe(context.Background(), "project-1", "recipe-1"); err != nil {
+		t.Fatalf("read recipe: %v", err)
+	}
+	if _, err := data.PipelineReads.GetPipeline(context.Background(), "project-1", "pipeline-1"); err != nil {
+		t.Fatalf("read pipeline: %v", err)
+	}
+	if _, err := data.ImageReads.ListImages(context.Background(), "project-1"); err != nil {
+		t.Fatalf("list images: %v", err)
+	}
+	wantScopes := []string{
+		"clients/packaging/component.read",
+		"clients/packaging/recipe.read",
+		"clients/packaging/pipeline.read",
+	}
+	if fmt.Sprint(requestedScopes) != fmt.Sprint(wantScopes) {
+		t.Fatalf("data source OAuth scopes = %q, want %q", requestedScopes, wantScopes)
+	}
+	for _, got := range apiRequests {
+		if !strings.HasPrefix(got, http.MethodGet+" ") {
+			t.Fatalf("data source sent non-GET request %q", got)
+		}
+	}
+}
+
 func TestProviderResourcesIncludesPipelines(t *testing.T) {
 	t.Parallel()
 
@@ -296,6 +375,32 @@ func TestProviderResourcesIncludesPipelines(t *testing.T) {
 		constructor().Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "vew"}, &response)
 		if response.TypeName != want[index] {
 			t.Fatalf("resource[%d] type = %q, want %q", index, response.TypeName, want[index])
+		}
+	}
+}
+
+func TestProviderDataSourcesIncludesExactSet(t *testing.T) {
+	t.Parallel()
+
+	dataSources := New("test")().DataSources(context.Background())
+	want := []string{
+		"vew_component",
+		"vew_component_version",
+		"vew_recipe",
+		"vew_recipe_version",
+		"vew_pipeline",
+		"vew_image",
+		"vew_pipelines",
+		"vew_images",
+	}
+	if len(dataSources) != len(want) {
+		t.Fatalf("data source constructors = %d, want %d", len(dataSources), len(want))
+	}
+	for index, constructor := range dataSources {
+		var response datasource.MetadataResponse
+		constructor().Metadata(context.Background(), datasource.MetadataRequest{ProviderTypeName: "vew"}, &response)
+		if response.TypeName != want[index] {
+			t.Fatalf("data source[%d] type = %q, want %q", index, response.TypeName, want[index])
 		}
 	}
 }

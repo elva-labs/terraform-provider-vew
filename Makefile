@@ -1,8 +1,8 @@
 GO ?= /Users/ruanheyns/.govm/go/bin/go
 
-export TF_ACC VEW_ACC_COMPONENT_VERSION VEW_ACC_RECIPE VEW_ACC_PIPELINE VEW_ACC_RELEASE_ACTIONS VEW_API_URL VEW_TOKEN_URL VEW_CLIENT_ID VEW_CLIENT_SECRET VEW_TEST_PROJECT_ID VEW_TEST_COMPONENT_ID VEW_TEST_COMPONENT_VERSION_ID VEW_TEST_RECIPE_ID VEW_TEST_RECIPE_VERSION_ID
+export TF_ACC VEW_ACC_COMPONENT_VERSION VEW_ACC_RECIPE VEW_ACC_PIPELINE VEW_ACC_RELEASE_ACTIONS VEW_ACC_DATA_SOURCES VEW_API_URL VEW_TOKEN_URL VEW_CLIENT_ID VEW_CLIENT_SECRET VEW_TEST_PROJECT_ID VEW_TEST_COMPONENT_ID VEW_TEST_COMPONENT_VERSION_ID VEW_TEST_RECIPE_ID VEW_TEST_RECIPE_VERSION_ID VEW_TEST_PIPELINE_ID VEW_TEST_IMAGE_ID
 
-.PHONY: fmt test build testacc testacc-component-version testacc-recipe testacc-pipeline testacc-release-actions
+.PHONY: fmt test build testacc testacc-component-version testacc-recipe testacc-pipeline testacc-release-actions testacc-data-sources
 
 fmt:
 	$(GO) fmt ./...
@@ -30,3 +30,11 @@ testacc-pipeline:
 testacc-release-actions: export TF_ACC ?= 1
 testacc-release-actions:
 	$(GO) test ./internal/provider/releaseactions -run '^TestAccReleaseActionsLiveDisposableVersions$$' -v -count=1 -timeout 4h
+
+# Set VEW_ACC_DATA_SOURCES=1 and provide VEW_API_URL, VEW_TOKEN_URL,
+# VEW_CLIENT_ID, VEW_CLIENT_SECRET, VEW_TEST_PROJECT_ID, and all six
+# VEW_TEST_*_ID fixtures (component, component version, recipe, recipe version,
+# pipeline, image) before running this read-only acceptance target.
+testacc-data-sources: export TF_ACC ?= 1
+testacc-data-sources:
+	$(GO) test ./internal/provider -run '^TestAccDataSourcesReadExistingObjectsOnly$$' -v -count=1 -timeout 30m

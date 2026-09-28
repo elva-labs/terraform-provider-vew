@@ -18,6 +18,13 @@ type RecipeAPI interface {
 	ArchiveRecipe(context.Context, string, string) error
 }
 
+// RecipeReadAPI is the least-privilege surface used by recipe data sources.
+type RecipeReadAPI interface {
+	GetRecipe(context.Context, string, string) (Recipe, error)
+}
+
+var _ RecipeReadAPI = (*Client)(nil)
+
 // Client accesses the recipe domain through VEW's authenticated transport.
 type Client struct {
 	transport      *vew.Transport

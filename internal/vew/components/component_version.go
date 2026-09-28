@@ -79,7 +79,13 @@ type ComponentVersionAPI interface {
 	RetireComponentVersion(context.Context, string, string, string) (ActionResult, error)
 }
 
+// ComponentVersionReadAPI is the least-privilege interface for component-version data sources.
+type ComponentVersionReadAPI interface {
+	GetComponentVersion(context.Context, string, string, string) (ComponentVersion, error)
+}
+
 var _ ComponentVersionAPI = (*Client)(nil)
+var _ ComponentVersionReadAPI = (*Client)(nil)
 
 // ComponentVersionReleaseAPI is the narrow component-version release surface
 // used by callers configured with release-only credentials.

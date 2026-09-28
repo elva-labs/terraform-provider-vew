@@ -6,6 +6,9 @@ versions, recipes, recipe versions, and image pipelines. It uses the VEW OAuth
 `vew_component_version`, `vew_recipe`, `vew_recipe_version`, and `vew_pipeline`
 resources.
 
+It also provides read-only data sources for components, versions, recipes,
+pipelines, and images.
+
 ## Prerequisites
 
 - Go 1.27 or newer (the module declares `go 1.27.0`).
@@ -129,6 +132,14 @@ during cleanup. It does not start an image build. It is skipped unless
 version that belongs to the supplied recipe. To compile the gated test without
 contacting VEW, run
 `make testacc-pipeline TF_ACC= VEW_ACC_PIPELINE=`.
+
+The data-source acceptance test reads existing objects without changing them.
+Set `TF_ACC=1`, `VEW_ACC_DATA_SOURCES=1`, the four provider environment
+variables, `VEW_TEST_PROJECT_ID`, and `VEW_TEST_COMPONENT_ID`,
+`VEW_TEST_COMPONENT_VERSION_ID`, `VEW_TEST_RECIPE_ID`,
+`VEW_TEST_RECIPE_VERSION_ID`, `VEW_TEST_PIPELINE_ID`, and
+`VEW_TEST_IMAGE_ID`, then run `make testacc-data-sources`. All IDs must belong
+to the supplied project. The test skips when any gate is missing.
 
 ## Local Terraform development override
 
@@ -475,10 +486,26 @@ Terraform records the returned ID; the same idempotency key is reused for
 transport retries within that attempt, but not across a later Terraform run.
 Inspect VEW before retrying after such a crash to avoid creating a duplicate.
 
+## Data sources
+
+The provider reads existing components, component versions, recipes, recipe
+versions, pipelines, and images with the exact-ID data sources `vew_component`,
+`vew_component_version`, `vew_recipe`, `vew_recipe_version`, `vew_pipeline`, and
+`vew_image`. `vew_pipelines` and `vew_images` list project objects. These
+sources do not mutate VEW; exact lookups require an existing ID, while lists
+can be empty. The caller needs project assignment and the corresponding
+component, recipe, or pipeline read scope.
+
+See the [data-source guide](docs/guides/data-sources.md) for scope and behavior
+details and the [example](examples/data-sources/README.md) for all eight
+data sources. Image build progress is not available as a structured Terraform
+value; read a known image ID or refresh `vew_images` after the build.
+
 ## Domain package layout
 
 Shared OAuth, HTTP transport, errors, and polling live in `internal/vew`.
 Domain API models and endpoint clients live in `internal/vew/components`,
-`internal/vew/recipes`, and `internal/vew/pipelines`. Terraform resources live
-in the matching `internal/provider` packages, while `internal/providerdata`
-carries their configured interfaces from the root provider.
+`internal/vew/recipes`, `internal/vew/pipelines`, and `internal/vew/images`.
+Terraform resources, data sources, and actions live in the matching
+`internal/provider` packages, while `internal/providerdata` carries their
+configured interfaces from the root provider.

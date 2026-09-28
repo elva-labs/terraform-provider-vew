@@ -3,6 +3,7 @@ package providerdata
 import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 )
@@ -10,11 +11,17 @@ import (
 // Data is shared by provider resources and data sources.
 type Data struct {
 	Components               components.API
+	ComponentReads           components.ComponentReadAPI
 	ComponentVersions        components.ComponentVersionAPI
+	ComponentVersionReads    components.ComponentVersionReadAPI
 	ComponentVersionReleases components.ComponentVersionReleaseAPI
+	ImageReads               images.ReadAPI
 	Pipelines                pipelines.API
+	PipelineReads            pipelines.ReadAPI
 	Recipes                  recipes.RecipeAPI
+	RecipeReads              recipes.RecipeReadAPI
 	RecipeVersions           recipes.RecipeVersionAPI
+	RecipeVersionReads       recipes.RecipeVersionReadAPI
 	RecipeVersionReleases    recipes.RecipeVersionReleaseAPI
 	Waiter                   vew.Waiter
 }

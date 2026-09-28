@@ -68,6 +68,13 @@ type RecipeVersionAPI interface {
 	RetireRecipeVersion(context.Context, string, string, string) (ActionResult, error)
 }
 
+// RecipeVersionReadAPI is the least-privilege surface used by recipe-version data sources.
+type RecipeVersionReadAPI interface {
+	GetRecipeVersion(context.Context, string, string, string) (RecipeVersion, error)
+}
+
+var _ RecipeVersionReadAPI = (*Client)(nil)
+
 var _ RecipeVersionAPI = (*Client)(nil)
 
 // RecipeVersionReleaseAPI is the narrow recipe-version release surface used

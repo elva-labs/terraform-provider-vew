@@ -29,6 +29,14 @@ type Client struct {
 
 var _ API = (*Client)(nil)
 
+// ReadAPI is the narrow project-scoped pipeline surface used by data sources.
+type ReadAPI interface {
+	ListPipelines(context.Context, string) ([]Pipeline, error)
+	GetPipeline(context.Context, string, string) (Pipeline, error)
+}
+
+var _ ReadAPI = (*Client)(nil)
+
 func NewClient(transport *vew.Transport) *Client {
 	return &Client{transport: transport, idempotencyKey: func() string { return uuid.New().String() }}
 }

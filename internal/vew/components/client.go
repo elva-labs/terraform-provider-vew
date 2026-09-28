@@ -19,6 +19,11 @@ type API interface {
 	ArchiveComponent(context.Context, string, string) error
 }
 
+// ComponentReadAPI is the least-privilege interface for component data sources.
+type ComponentReadAPI interface {
+	GetComponent(context.Context, string, string) (Component, error)
+}
+
 // Client is the VEW component-domain API client.
 type Client struct {
 	transport      *vew.Transport
@@ -26,6 +31,7 @@ type Client struct {
 }
 
 var _ API = (*Client)(nil)
+var _ ComponentReadAPI = (*Client)(nil)
 
 // NewClient constructs a component client using a shared authenticated transport.
 func NewClient(transport *vew.Transport) *Client {

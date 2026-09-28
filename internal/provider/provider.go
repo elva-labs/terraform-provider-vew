@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	providercomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/components"
+	providerimages "github.com/elva-labs/terraform-provider-vew/internal/provider/images"
 	providerpipelines "github.com/elva-labs/terraform-provider-vew/internal/provider/pipelines"
 	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
 	providerreleaseactions "github.com/elva-labs/terraform-provider-vew/internal/provider/releaseactions"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/hashicorp/terraform-plugin-framework/action"
@@ -75,9 +77,19 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		response.Diagnostics.AddError("Unable to configure VEW client", "The VEW client could not be configured.")
 		return
 	}
+	componentReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/component.read")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW component read client", "The VEW component read client could not be configured.")
+		return
+	}
 	recipeTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/recipe.read", "clients/packaging/recipe.write")
 	if err != nil {
 		response.Diagnostics.AddError("Unable to configure VEW recipe client", "The VEW recipe client could not be configured.")
+		return
+	}
+	recipeReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/recipe.read")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW recipe read client", "The VEW recipe read client could not be configured.")
 		return
 	}
 	componentReleaseTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/component.release")
@@ -95,18 +107,33 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		response.Diagnostics.AddError("Unable to configure VEW pipeline client", "The VEW pipeline client could not be configured.")
 		return
 	}
+	pipelineReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/pipeline.read")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW pipeline read client", "The VEW pipeline read client could not be configured.")
+		return
+	}
 	api := components.NewClient(transport)
+	componentReadAPI := components.NewClient(componentReadTransport)
 	recipeAPI := recipes.NewClient(recipeTransport)
+	recipeReadAPI := recipes.NewClient(recipeReadTransport)
 	componentReleaseAPI := components.NewClient(componentReleaseTransport)
 	recipeReleaseAPI := recipes.NewClient(recipeReleaseTransport)
 	pipelineAPI := pipelines.NewClient(pipelineTransport)
+	pipelineReadAPI := pipelines.NewClient(pipelineReadTransport)
+	imageReadAPI := images.NewClient(pipelineReadTransport)
 	data := providerdata.Data{
 		Components:               api,
+		ComponentReads:           componentReadAPI,
 		ComponentVersions:        api,
+		ComponentVersionReads:    componentReadAPI,
 		ComponentVersionReleases: componentReleaseAPI,
+		ImageReads:               imageReadAPI,
 		Pipelines:                pipelineAPI,
+		PipelineReads:            pipelineReadAPI,
 		Recipes:                  recipeAPI,
+		RecipeReads:              recipeReadAPI,
 		RecipeVersions:           recipeAPI,
+		RecipeVersionReads:       recipeReadAPI,
 		RecipeVersionReleases:    recipeReleaseAPI,
 		Waiter:                   vew.NewWaiter(),
 	}
@@ -173,7 +200,16 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 }
 
 func (p *vewProvider) DataSources(context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		providercomponents.NewComponentDataSource,
+		providercomponents.NewComponentVersionDataSource,
+		providerrecipes.NewRecipeDataSource,
+		providerrecipes.NewRecipeVersionDataSource,
+		providerpipelines.NewPipelineDataSource,
+		providerimages.NewImageDataSource,
+		providerpipelines.NewPipelinesDataSource,
+		providerimages.NewImagesDataSource,
+	}
 }
 
 func (p *vewProvider) Actions(context.Context) []func() action.Action {
