@@ -191,6 +191,12 @@ func TestRetryAfterReturnsDeltaSeconds(t *testing.T) {
 	}
 }
 
+func TestRetryAfterCapsLargeDeltaSeconds(t *testing.T) {
+	if got := RetryAfter(http.Header{"Retry-After": []string{"3600"}}, time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)); got != maxServerRetryDelay {
+		t.Fatalf("RetryAfter = %v, want %v", got, maxServerRetryDelay)
+	}
+}
+
 func TestRetryAfterReturnsZeroForOverflowingDeltaSeconds(t *testing.T) {
 	if got := RetryAfter(http.Header{"Retry-After": []string{"9223372037"}}, time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)); got != 0 {
 		t.Fatalf("RetryAfter = %v, want 0", got)
@@ -202,6 +208,14 @@ func TestRetryAfterReturnsHTTPDateDelay(t *testing.T) {
 	header := http.Header{"Retry-After": []string{now.Add(7 * time.Second).Format(http.TimeFormat)}}
 	if got := RetryAfter(header, now); got != 7*time.Second {
 		t.Fatalf("RetryAfter = %v, want 7s", got)
+	}
+}
+
+func TestRetryAfterCapsDistantHTTPDate(t *testing.T) {
+	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
+	header := http.Header{"Retry-After": []string{now.Add(24 * time.Hour).Format(http.TimeFormat)}}
+	if got := RetryAfter(header, now); got != maxServerRetryDelay {
+		t.Fatalf("RetryAfter = %v, want %v", got, maxServerRetryDelay)
 	}
 }
 
