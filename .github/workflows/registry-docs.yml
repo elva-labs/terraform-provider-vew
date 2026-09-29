@@ -1,8 +1,8 @@
 name: Checks
 
 on:
-  pull_request_target:
-    types: [labeled]
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -11,18 +11,10 @@ permissions:
 
 jobs:
   docs:
-    if: >-
-      github.event_name == 'push' ||
-      (github.event.label.name == 'runner-approved' &&
-       github.event.sender.login != github.event.pull_request.user.login &&
-       github.event.pull_request.base.ref == 'main' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.state == 'open')
-    runs-on: [self-hosted, fargate, arm]
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
@@ -35,20 +27,12 @@ jobs:
         run: python3 scripts/registry_docs.py check
 
   tests:
-    if: >-
-      github.event_name == 'push' ||
-      (github.event.label.name == 'runner-approved' &&
-       github.event.sender.login != github.event.pull_request.user.login &&
-       github.event.pull_request.base.ref == 'main' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.state == 'open')
-    runs-on: [self-hosted, fargate, arm]
+    runs-on: ubuntu-24.04-arm
     env:
       TF_ACC: "0"
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
