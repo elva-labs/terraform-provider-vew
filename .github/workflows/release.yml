@@ -18,7 +18,7 @@ concurrency:
 jobs:
   release:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fargate, arm]
     env:
       TF_ACC: "0"
     steps:
@@ -32,6 +32,15 @@ jobs:
         with:
           terraform_version: 1.16.3
           terraform_wrapper: false
+      - name: Install race detector C compiler
+        run: |
+          if ! command -v gcc >/dev/null; then
+            if [ "$(id -u)" -eq 0 ]; then
+              apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev
+            else
+              sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev
+            fi
+          fi
       - name: Check tests and Registry documentation
         run: |
           make test GO=go

@@ -54,9 +54,17 @@ Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
-The GitHub Actions workflow runs this check and `make test GO=go` on pull
-requests and pushes to `main`. It uses Terraform 1.16.3 and `tfplugindocs`
-v0.25.0. Live acceptance tests remain separately gated. The historical
+The GitHub Actions workflow runs this check and `make test GO=go` on pushes to
+`main`. For a pull request from this repository into `main`, a teammate with
+label permission other than the PR author signals approval by adding the
+`runner-approved` label to start both jobs. After a new commit, remove and
+reapply the label to approve another run. The PR cannot change this approval
+gate because the label event uses the workflow from `main`. It uses Terraform
+1.16.3 and `tfplugindocs`
+v0.25.0. These jobs use the shared ARM Fargate Spot runner. Pull requests from
+forks do not run on that runner because it has access to the AWS environment.
+Runner compute is billed to the AWS account hosting the shared runners stack.
+Live acceptance tests remain separately gated. The historical
 design notes live in `design/superpowers/` so `docs/` contains only Registry
 pages.
 
@@ -605,8 +613,9 @@ The [release workflow](.github/workflows/release.yml) builds signed Terraform
 Registry assets from the current `main` commit. After the checks on `main`
 pass, start **Release provider** in GitHub Actions on the `main` branch and
 enter a new SemVer tag such as `v0.1.0`. The workflow reruns tests and the docs
-check, creates the tag on that commit, then uses GoReleaser to publish a GitHub
-Release. It will not release a commit from another branch. Do not move or
+check on the same ARM Fargate Spot runner, creates the tag on that commit, then
+uses GoReleaser to publish a GitHub Release. It will not release a commit from
+another branch. Do not move or
 replace a published version tag; release a new version for corrections.
 
 Before the first run, configure repository Actions secrets `GPG_PRIVATE_KEY`
