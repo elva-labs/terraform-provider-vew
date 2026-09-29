@@ -82,7 +82,7 @@ func TestProjectAccountAcceptanceGate(t *testing.T) {
 		"TF_ACC": "1", "VEW_ACC_PROJECT_ACCOUNT": "1", "VEW_API_URL": "https://api.example.invalid/clients/packaging/v1",
 		"VEW_PROJECTS_API_URL": "https://api.example.invalid/clients/projects/v1", "VEW_TOKEN_URL": "https://auth.example.invalid/token",
 		"VEW_CLIENT_ID": "client", "VEW_CLIENT_SECRET": "secret", "VEW_TEST_PROJECT_ID": "project-1",
-		"VEW_TEST_AWS_ACCOUNT_ID": "123456789012", "VEW_TEST_TECHNOLOGY_ID": "technology-1", "VEW_TEST_ACCOUNT_TYPE": "USER",
+		"VEW_TEST_AWS_ACCOUNT_ID": "000000000000", "VEW_TEST_TECHNOLOGY_ID": "technology-1", "VEW_TEST_ACCOUNT_TYPE": "USER",
 		"VEW_TEST_ACCOUNT_STAGE": "dev", "VEW_TEST_ACCOUNT_REGION": "eu-west-1", "VEW_CONFIRM_AWS_ACCOUNT_SIDE_EFFECTS": awsSideEffectConfirmation,
 	}
 	if got := projectAccountAcceptanceMissingGates(func(name string) string { return valid[name] }); len(got) != 0 {

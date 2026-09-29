@@ -31,7 +31,7 @@ provider "vew" {
 }
 resource "vew_project_account" "test" {
   project_id = "project-1"
-  aws_account_id = "123456789012"
+  aws_account_id = "000000000000"
   account_type = "USER"
   name = %q
   description = "protocol test"
@@ -173,7 +173,7 @@ func newAccountProtocolFixture(t *testing.T) *accountProtocolFixture {
 				http.Error(w, "update body must use description", http.StatusBadRequest)
 				return
 			}
-			body["awsAccountId"] = "123456789012"
+			body["awsAccountId"] = "000000000000"
 			f.polls = 0
 			f.account = protocolAccount(body, "ReOnBoarding", "")
 			w.Header().Set("Content-Type", "application/json")

@@ -44,7 +44,7 @@ func testAccountClient(t *testing.T, serverURL string) *Client {
 
 func TestCreateAccountUsesWriteScopeExactRequestAndRetryAfter(t *testing.T) {
 	const key = "9f135a8d-47f2-4a8a-bc2a-8cba77df05b6"
-	input := AccountInput{AWSAccountID: "123456789012", AccountType: "USER", Name: "production", Description: "primary account", TechnologyID: "tech-1", Stage: "prod", Region: "eu-north-1"}
+	input := AccountInput{AWSAccountID: "000000000000", AccountType: "USER", Name: "production", Description: "primary account", TechnologyID: "tech-1", Stage: "prod", Region: "eu-north-1"}
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if accountToken(w, request) {
@@ -61,7 +61,7 @@ func TestCreateAccountUsesWriteScopeExactRequestAndRetryAfter(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
 			t.Error(err)
 		}
-		want := map[string]any{"awsAccountId": "123456789012", "accountType": "USER", "name": "production", "description": "primary account", "technologyId": "tech-1", "stage": "prod", "region": "eu-north-1"}
+		want := map[string]any{"awsAccountId": "000000000000", "accountType": "USER", "name": "production", "description": "primary account", "technologyId": "tech-1", "stage": "prod", "region": "eu-north-1"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("body = %#v", got)
 		}
@@ -101,7 +101,7 @@ func TestCreateAccountRetryReusesKeyAndByteIdenticalBody(t *testing.T) {
 		_, _ = io.WriteString(w, `{"accountId":"accepted-id"}`)
 	}))
 	defer server.Close()
-	result, err := testAccountClient(t, server.URL).CreateAccount(context.Background(), "project", AccountInput{AWSAccountID: "123456789012", Name: "name"}, "2f135a8d-47f2-4a8a-bc2a-8cba77df05b6")
+	result, err := testAccountClient(t, server.URL).CreateAccount(context.Background(), "project", AccountInput{AWSAccountID: "000000000000", Name: "name"}, "2f135a8d-47f2-4a8a-bc2a-8cba77df05b6")
 	if err != nil || result.ID != "accepted-id" {
 		t.Fatalf("create = %#v, %v", result, err)
 	}
@@ -122,14 +122,14 @@ func TestGetAccountUsesReadScopeDecodesSafeShapeAndRetryAfter(t *testing.T) {
 			t.Errorf("headers = %#v", request.Header)
 		}
 		w.Header().Set("Retry-After", "3")
-		_, _ = io.WriteString(w, `{"accountId":"internal/id","projectId":"project/one","awsAccountId":"123456789012","accountType":"USER","name":"prod","description":"primary","technologyId":"technology","stage":"prod","region":"eu-north-1","status":"OnBoarding","lastOnboardingResult":"Pending","lastOnboardingError":"","createDate":"2026-09-01T00:00:00Z","lastUpdateDate":"2026-09-02T00:00:00Z"}`)
+		_, _ = io.WriteString(w, `{"accountId":"internal/id","projectId":"project/one","awsAccountId":"000000000000","accountType":"USER","name":"prod","description":"primary","technologyId":"technology","stage":"prod","region":"eu-north-1","status":"OnBoarding","lastOnboardingResult":"Pending","lastOnboardingError":"","createDate":"2026-09-01T00:00:00Z","lastUpdateDate":"2026-09-02T00:00:00Z"}`)
 	}))
 	defer server.Close()
 	account, err := testAccountClient(t, server.URL).GetAccount(context.Background(), "project/one", "internal/id")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.ID != "internal/id" || account.ProjectID != "project/one" || account.AWSAccountID != "123456789012" || account.Name != "prod" || account.Status != "OnBoarding" || account.LastOnboardingResult != "Pending" || account.CreatedAt.IsZero() || account.UpdatedAt.IsZero() || account.RetryAfter != 3*time.Second {
+	if account.ID != "internal/id" || account.ProjectID != "project/one" || account.AWSAccountID != "000000000000" || account.Name != "prod" || account.Status != "OnBoarding" || account.LastOnboardingResult != "Pending" || account.CreatedAt.IsZero() || account.UpdatedAt.IsZero() || account.RetryAfter != 3*time.Second {
 		t.Fatalf("account = %#v", account)
 	}
 	if strings.Contains(strings.ToLower(strings.Join([]string{account.ID, account.Name, account.Description}, " ")), "unsafe") {

@@ -223,7 +223,7 @@ func TestProviderProjectsClientsUseSeparateScopesAndEndpoint(t *testing.T) {
 		case "DELETE /clients/projects/v1/projects/project-1/technologies/technology-1":
 			w.WriteHeader(http.StatusNoContent)
 		case "GET /clients/projects/v1/projects/project-1/accounts/account-1":
-			_, _ = fmt.Fprint(w, `{"accountId":"account-1","projectId":"project-1","awsAccountId":"123456789012","accountType":"USER","name":"test","description":"test account","technologyId":"technology-1","stage":"prod","region":"eu-north-1","status":"Active","lastOnboardingResult":"Succeeded","lastOnboardingError":null}`)
+			_, _ = fmt.Fprint(w, `{"accountId":"account-1","projectId":"project-1","awsAccountId":"000000000000","accountType":"USER","name":"test","description":"test account","technologyId":"technology-1","stage":"prod","region":"eu-north-1","status":"Active","lastOnboardingResult":"Succeeded","lastOnboardingError":null}`)
 		case "DELETE /clients/projects/v1/projects/project-1/accounts/account-1":
 			w.WriteHeader(http.StatusNoContent)
 		default:

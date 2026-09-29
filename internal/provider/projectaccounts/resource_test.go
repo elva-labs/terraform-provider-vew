@@ -76,11 +76,11 @@ func (w *instantWaiter) Until(_ context.Context, timeout, delay time.Duration, r
 }
 
 func testAccount(id, status, result string) vewaccounts.Account {
-	return vewaccounts.Account{ID: id, ProjectID: "project-1", AWSAccountID: "123456789012", Name: "Build", Description: "test", AccountType: "USER", TechnologyID: "technology-1", Stage: "dev", Region: "eu-west-1", Status: status, LastOnboardingResult: result, LastOnboardingErrorMessage: "token=secret raw workflow detail", CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)}
+	return vewaccounts.Account{ID: id, ProjectID: "project-1", AWSAccountID: "000000000000", Name: "Build", Description: "test", AccountType: "USER", TechnologyID: "technology-1", Stage: "dev", Region: "eu-west-1", Status: status, LastOnboardingResult: result, LastOnboardingErrorMessage: "token=secret raw workflow detail", CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)}
 }
 
 func validModel() model {
-	return model{ID: types.StringNull(), ProjectID: types.StringValue("project-1"), AWSAccountID: types.StringValue("123456789012"), AccountType: types.StringValue("USER"), Name: types.StringValue("Build"), Description: types.StringValue("test"), TechnologyID: types.StringValue("technology-1"), Stage: types.StringValue("dev"), Region: types.StringValue("eu-west-1"), Status: types.StringNull(), LastOnboardingResult: types.StringNull(), LastOnboardingError: types.StringNull(), CreatedAt: types.StringNull(), UpdatedAt: types.StringNull(), Timeouts: types.ObjectNull(timeoutAttrTypes)}
+	return model{ID: types.StringNull(), ProjectID: types.StringValue("project-1"), AWSAccountID: types.StringValue("000000000000"), AccountType: types.StringValue("USER"), Name: types.StringValue("Build"), Description: types.StringValue("test"), TechnologyID: types.StringValue("technology-1"), Stage: types.StringValue("dev"), Region: types.StringValue("eu-west-1"), Status: types.StringNull(), LastOnboardingResult: types.StringNull(), LastOnboardingError: types.StringNull(), CreatedAt: types.StringNull(), UpdatedAt: types.StringNull(), Timeouts: types.ObjectNull(timeoutAttrTypes)}
 }
 
 func stateFor(t *testing.T, m model) tfsdk.State {
@@ -172,7 +172,7 @@ func TestCreatePersistsAcceptedIDBeforeWaitingAndHonorsRetryAfter(t *testing.T) 
 	if got.ID.ValueString() != "internal-account" || got.Status.ValueString() != "Active" || got.LastOnboardingResult.ValueString() != "Succeeded" {
 		t.Fatalf("state=%#v", got)
 	}
-	if api.createCalls != 1 || api.createInput.AWSAccountID != "123456789012" || !validUUID(api.createKey) || waiter.timeout != 2*time.Hour || waiter.delay != 7*time.Second {
+	if api.createCalls != 1 || api.createInput.AWSAccountID != "000000000000" || !validUUID(api.createKey) || waiter.timeout != 2*time.Hour || waiter.delay != 7*time.Second {
 		t.Fatalf("create/wait details: %#v %#v", api, waiter)
 	}
 	if got.LastOnboardingError.ValueString() != "" {

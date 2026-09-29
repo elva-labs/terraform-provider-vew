@@ -20,7 +20,7 @@
 - Treat VEW 404 and ARCHIVED as absent state.
 - Delete means archive.
 - Live acceptance requires TF_ACC=1, all VEW variables, and explicit authorization.
-- Invoke Go as /Users/ruanheyns/.govm/go/bin/go until govm is on the shell PATH.
+- Invoke Go as go until govm is on the shell PATH.
 
 ## File Map
 
@@ -82,7 +82,7 @@ func TestProviderSchema(t *testing.T)
 - [ ] **Step 3: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run 'TestProvider(Metadata|Schema)$' -count=1
+go test ./internal/provider -run 'TestProvider(Metadata|Schema)$' -count=1
 ~~~
 
 Expected: compile failure because New is undefined.
@@ -104,10 +104,10 @@ providerserver.Serve(
 - [ ] **Step 5: Format, test, build, and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go mod tidy
-/Users/ruanheyns/.govm/go/bin/go fmt ./...
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -count=1
-/Users/ruanheyns/.govm/go/bin/go build ./cmd/terraform-provider-vew
+go mod tidy
+go fmt ./...
+go test ./internal/provider -count=1
+go build ./cmd/terraform-provider-vew
 git add .gitignore LICENSE go.mod go.sum cmd internal/provider
 git commit -m "feat: scaffold vew terraform provider"
 ~~~
@@ -148,7 +148,7 @@ The safe-error test places the secret in a response body and proves the returned
 - [ ] **Step 2: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/client -run TestOAuthTokenSource -count=1
+go test ./internal/client -run TestOAuthTokenSource -count=1
 ~~~
 
 Expected: compile failure because TokenSource is undefined.
@@ -162,8 +162,8 @@ Token returns a cached token only when more than 30 seconds remain. Otherwise PO
 - [ ] **Step 4: Format, test, and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/client
-/Users/ruanheyns/.govm/go/bin/go test ./internal/client -run TestOAuthTokenSource -count=1
+go fmt ./internal/client
+go test ./internal/client -run TestOAuthTokenSource -count=1
 git add internal/client
 git commit -m "feat: add oauth client credentials authentication"
 ~~~
@@ -208,7 +208,7 @@ The lost-response RoundTripper records body and Idempotency-Key, returns io.ErrU
 - [ ] **Step 2: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/client -run 'Test(Client|APIError)' -count=1
+go test ./internal/client -run 'Test(Client|APIError)' -count=1
 ~~~
 
 Expected: compile failure because client types are missing.
@@ -239,8 +239,8 @@ Retry network errors, 429, retryable problems, 5xx, and 409 only for IDEMPOTENCY
 - [ ] **Step 5: Run with race detection and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/client
-/Users/ruanheyns/.govm/go/bin/go test ./internal/client -race -count=1
+go fmt ./internal/client
+go test ./internal/client -race -count=1
 git add internal/client
 git commit -m "feat: add idempotent vew component client"
 ~~~
@@ -265,7 +265,7 @@ Cover explicit values, environment-only values, explicit-over-environment preced
 - [ ] **Step 2: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run TestProviderConfig -count=1
+go test ./internal/provider -run TestProviderConfig -count=1
 ~~~
 
 Expected: failure because configuration resolution is absent.
@@ -279,8 +279,8 @@ Configure decodes config, resolves it, calls client.New, and assigns client.Comp
 - [ ] **Step 4: Test and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run TestProvider -count=1
+go fmt ./internal/provider
+go test ./internal/provider -run TestProvider -count=1
 git add internal/provider
 git commit -m "feat: configure vew api client"
 ~~~
@@ -319,12 +319,12 @@ updated_at               computed string
 updated_by               computed string
 ~~~
 
-Import prog-73488/cmp-123 succeeds. Empty, missing-slash, empty-half, and multiple-slash inputs fail.
+Import project-example/cmp-123 succeeds. Empty, missing-slash, empty-half, and multiple-slash inputs fail.
 
 - [ ] **Step 2: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run 'TestComponentResource(Schema|Import)' -count=1
+go test ./internal/provider -run 'TestComponentResource(Schema|Import)' -count=1
 ~~~
 
 Expected: compile failure because the resource is undefined.
@@ -338,8 +338,8 @@ Convert sets with ElementsAs, reject null/unknown values, and sort before buildi
 - [ ] **Step 4: Test and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run 'TestComponentResource(Schema|Import)' -count=1
+go fmt ./internal/provider
+go test ./internal/provider -run 'TestComponentResource(Schema|Import)' -count=1
 git add internal/provider
 git commit -m "feat: define vew component resource"
 ~~~
@@ -370,7 +370,7 @@ Use resource.Test with IsUnitTest true and:
 
 ~~~hcl
 resource "vew_component" "test" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "terraform-test-component"
   description             = "created by provider test"
   platform                = "Linux"
@@ -379,12 +379,12 @@ resource "vew_component" "test" {
 }
 ~~~
 
-Steps: create/check state, empty plan, update description, import prog-73488/cmp-123, and destroy/archive. Add direct Read tests for 404 and ARCHIVED removal.
+Steps: create/check state, empty plan, update description, import project-example/cmp-123, and destroy/archive. Add direct Read tests for 404 and ARCHIVED removal.
 
 - [ ] **Step 3: Verify red**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run 'TestComponentResource(Lifecycle|ReadRemoves)' -count=1
+go test ./internal/provider -run 'TestComponentResource(Lifecycle|ReadRemoves)' -count=1
 ~~~
 
 Expected: lifecycle failures because CRUD is absent.
@@ -400,9 +400,9 @@ Read uses project_id and id. Remove state on IsNotFound or ARCHIVED. Update send
 - [ ] **Step 6: Test and commit**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/provider
+go test ./internal/provider -count=1
+go test ./... -race -count=1
 git add internal/provider
 git commit -m "feat: manage vew component lifecycle"
 ~~~
@@ -427,7 +427,7 @@ TestAccComponentResource creates a unique tf-acc timestamp name and runs: create
 - [ ] **Step 2: Compile without external writes**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run '^$' -count=1
+go test ./internal/provider -run '^$' -count=1
 ~~~
 
 Expected: package compiles and no test runs.
@@ -435,7 +435,7 @@ Expected: package compiles and no test runs.
 - [ ] **Step 3: Run only after authorization**
 
 ~~~bash
-TF_ACC=1 /Users/ruanheyns/.govm/go/bin/go test ./internal/provider -run '^TestAccComponentResource$' -v -count=1 -timeout 20m
+TF_ACC=1 go test ./internal/provider -run '^TestAccComponentResource$' -v -count=1 -timeout 20m
 ~~~
 
 Expected: create, empty plan, update, import, and archive pass. If live authorization is unavailable, record this verification as pending without weakening the source.
@@ -465,12 +465,12 @@ git commit -m "test: add vew component acceptance coverage"
 
 - [ ] **Step 1: Add examples**
 
-Provider source is elva-labs/vew and provider configuration is empty so environment fallbacks are demonstrated. The resource example uses project prog-73488, Linux, arm64/x86_64, and Ubuntu 24.
+Provider source is elva-labs/vew and provider configuration is empty so environment fallbacks are demonstrated. The resource example uses project project-example, Linux, arm64/x86_64, and Ubuntu 24.
 
 - [ ] **Step 2: Add Make targets**
 
 ~~~make
-GO ?= /Users/ruanheyns/.govm/go/bin/go
+GO ?= go
 
 .PHONY: fmt test build testacc
 
@@ -494,11 +494,11 @@ Include prerequisites, build/test commands, Terraform dev override, all provider
 - [ ] **Step 4: Run final verification**
 
 ~~~bash
-/Users/ruanheyns/.govm/go/bin/go mod tidy
-/Users/ruanheyns/.govm/go/bin/go fmt ./...
-/Users/ruanheyns/.govm/go/bin/go vet ./...
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
-/Users/ruanheyns/.govm/go/bin/go build ./cmd/terraform-provider-vew
+go mod tidy
+go fmt ./...
+go vet ./...
+go test ./... -race -count=1
+go build ./cmd/terraform-provider-vew
 terraform version
 git diff --check
 ~~~

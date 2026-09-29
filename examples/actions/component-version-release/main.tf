@@ -10,7 +10,7 @@ terraform {
 provider "vew" {}
 
 resource "vew_component" "example" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "example-component-release"
   description             = "Component for the release action example"
   platform                = "Linux"

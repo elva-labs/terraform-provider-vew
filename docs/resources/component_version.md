@@ -16,7 +16,7 @@ stored in Terraform state, so secure state and plan files accordingly.
 
 ```terraform
 resource "vew_component" "example" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "example-component-version-parent"
   description             = "Parent component managed by Terraform"
   platform                = "Linux"
@@ -121,7 +121,7 @@ Optional:
 Import an existing version with `project_id/component_id/version_id`:
 
 ```shell
-terraform import vew_component_version.example prog-73488/cmp-123/version-456
+terraform import vew_component_version.example project-example/cmp-123/version-456
 ```
 
 VEW does not return the original `release_type`. Omit that argument when

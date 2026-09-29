@@ -52,7 +52,7 @@ func TestComponentResourceLifecycle(t *testing.T) {
 				}
 				return nil
 			})},
-			{ResourceName: "vew_component.test", ImportState: true, ImportStateId: "prog-73488/cmp-123", ImportStateVerify: true},
+			{ResourceName: "vew_component.test", ImportState: true, ImportStateId: "project-example/cmp-123", ImportStateVerify: true},
 		},
 	})
 }
@@ -60,7 +60,7 @@ func TestComponentResourceLifecycle(t *testing.T) {
 func componentResourceConfig(description string) string {
 	return fmt.Sprintf(`
 resource "vew_component" "test" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "terraform-test-component"
   description             = %q
   platform                = "Linux"

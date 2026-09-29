@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Module path remains `github.com/elva-labs/terraform-provider-vew`.
-- Invoke Go as `/Users/ruanheyns/.govm/go/bin/go` until `govm` is on the shell `PATH`.
+- Invoke Go as `go` until `govm` is on the shell `PATH`.
 - Work test-first: add one focused failing test, observe the expected failure, implement the smallest behavior, then rerun the focused test.
 - Preserve all current `vew_component` schema, import, retry, archive, and acceptance behavior during the package move.
 - Do not add component-version release management.
@@ -211,7 +211,7 @@ The one configured `components.Client` implements both API interfaces. Resource 
 Run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go test ./... -race -count=1
 ```
 
 Expected: all existing OAuth, client, provider, component unit, protocol, and gated acceptance tests pass or skip.
@@ -223,7 +223,7 @@ Move the existing token source and tests from `internal/client` to `internal/vew
 Run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew -run 'Test(OAuth|APIError)' -count=1
+go test ./internal/vew -run 'Test(OAuth|APIError)' -count=1
 ```
 
 Expected: the moved tests pass.
@@ -237,7 +237,7 @@ Move the existing transport-level tests and make them call a small test-only wra
 Run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew -run 'Test(Transport|ClientRefreshes|ClientStops|ClientDecodes)' -count=1
+go test ./internal/vew -run 'Test(Transport|ClientRefreshes|ClientStops|ClientDecodes)' -count=1
 ```
 
 Expected: all transport, refresh, retry, and problem tests pass.
@@ -249,7 +249,7 @@ Move `Component`, `CreateComponentInput`, `UpdateComponentInput`, `ComponentAPI`
 Run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew/components -run TestClient -count=1
+go test ./internal/vew/components -run TestClient -count=1
 ```
 
 Expected: the moved component client tests pass with identical path, payload, retry, and idempotency assertions.
@@ -277,8 +277,8 @@ Register `providercomponents.NewComponentResource` from `Resources`. Keep provid
 Run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/vew ./internal/provider ./internal/providerdata
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/vew ./internal/provider ./internal/providerdata
+go test ./... -race -count=1
 rg 'internal/client|NewComponentResource' --glob '*.go'
 ```
 
@@ -321,7 +321,7 @@ The delay test asserts an action's five-second initial delay occurs before the f
 - [ ] **Step 2: Verify red**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew -run TestWaiter -count=1
+go test ./internal/vew -run TestWaiter -count=1
 ```
 
 Expected: compile failure because `NewWaiter` and waiter types do not exist.
@@ -345,9 +345,9 @@ func (e *TimeoutError) Error() string {
 - [ ] **Step 4: Test and commit**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/vew
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew -run TestWaiter -race -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/vew
+go test ./internal/vew -run TestWaiter -race -count=1
+go test ./... -race -count=1
 git add internal/vew/waiter.go internal/vew/waiter_test.go
 git commit -m "feat: add asynchronous status waiter"
 ```
@@ -394,7 +394,7 @@ Assert POST and PUT use the exact camelCase body fields from the approved spec, 
 - [ ] **Step 2: Verify red**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew/components -run 'Test(Create|Get|Update|Retire)ComponentVersion|TestComponentVersionAction' -count=1
+go test ./internal/vew/components -run 'Test(Create|Get|Update|Retire)ComponentVersion|TestComponentVersionAction' -count=1
 ```
 
 Expected: compile failure because component-version types and methods do not exist.
@@ -434,9 +434,9 @@ Keep the definition as `json.RawMessage`; never interpolate it into errors. Crea
 - [ ] **Step 5: Test and commit**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/vew
-/Users/ruanheyns/.govm/go/bin/go test ./internal/vew/components -race -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/vew
+go test ./internal/vew/components -race -count=1
+go test ./... -race -count=1
 git add internal/vew
 git commit -m "feat: add component version api client"
 ```
@@ -479,7 +479,7 @@ Inject only missing keys. Preserve explicit zero, empty, or non-default values. 
 - [ ] **Step 2: Verify definition tests red, then implement**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -run TestNormalizeDefinition -count=1
+go test ./internal/provider/components -run TestNormalizeDefinition -count=1
 ```
 
 Expected: compile failure because `normalizeDefinition` does not exist. Implement it and rerun until green.
@@ -516,7 +516,7 @@ type dependencyModel struct {
 - [ ] **Step 4: Verify dependency tests red, then implement**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -run TestExpandDependencies -count=1
+go test ./internal/provider/components -run TestExpandDependencies -count=1
 ```
 
 Expected: compile failure because the model and converter do not exist. Implement list decoding, field validation, the default `HELPER`, optional nil position, duplicate-order detection, and ascending order sort. Diagnostics name the dependency index and field but do not include the definition.
@@ -524,9 +524,9 @@ Expected: compile failure because the model and converter do not exist. Implemen
 - [ ] **Step 5: Test and commit**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider/components
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -race -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/provider/components
+go test ./internal/provider/components -race -count=1
+go test ./... -race -count=1
 git add internal/provider/components
 git commit -m "feat: normalize component version configuration"
 ```
@@ -583,7 +583,7 @@ type timeoutsModel struct {
 - [ ] **Step 2: Verify schema tests red, then implement schema and configure**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -run 'TestComponentVersionResource(Metadata|Schema|Configure)' -count=1
+go test ./internal/provider/components -run 'TestComponentVersionResource(Metadata|Schema|Configure)' -count=1
 ```
 
 Expected: compile failure because the resource constructor does not exist. Implement metadata, schema, interface assertions, and `Configure`. `Configure` stores `ComponentVersions` and `Waiter`, and diagnoses missing or wrongly typed provider data.
@@ -645,9 +645,9 @@ Update root provider tests to assert both resource type names.
 Run all unit tests except the adoption apply test if CRUD methods still return explicit not-implemented diagnostics; that test becomes green in Task 6.
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider ./internal/providerdata
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -run 'TestComponentVersionResource|TestComponentVersionImport|TestKnownReleaseType|TestOperationTimeout' -race -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/provider ./internal/providerdata
+go test ./internal/provider/components -run 'TestComponentVersionResource|TestComponentVersionImport|TestKnownReleaseType|TestOperationTimeout' -race -count=1
+go test ./... -race -count=1
 git add internal/provider internal/providerdata
 git commit -m "feat: define component version resource contract"
 ```
@@ -745,9 +745,9 @@ Delete first GETs the version. A `404` or `RETIRED` succeeds immediately. Pendin
 - [ ] **Step 7: Make all lifecycle and import tests green**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./internal/provider
-/Users/ruanheyns/.govm/go/bin/go test ./internal/provider/components -run 'TestComponentVersion(Create|Read|Update|Delete|Import|Known)' -race -count=1
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./internal/provider
+go test ./internal/provider/components -run 'TestComponentVersion(Create|Read|Update|Delete|Import|Known)' -race -count=1
+go test ./... -race -count=1
 ```
 
 Expected: every component and component-version test passes; the old `vew_component` lifecycle is unchanged.
@@ -816,9 +816,9 @@ It creates a new disposable component version under the explicitly supplied test
 Add a component-version acceptance target that forwards the gates above. Then run:
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go fmt ./...
-/Users/ruanheyns/.govm/go/bin/go vet ./...
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
+go fmt ./...
+go vet ./...
+go test ./... -race -count=1
 terraform fmt -check -recursive examples
 ```
 
@@ -840,10 +840,10 @@ git commit -m "docs: add component version usage and acceptance coverage"
 - [ ] **Step 1: Run the complete clean verification gate**
 
 ```bash
-/Users/ruanheyns/.govm/go/bin/go clean -testcache
-/Users/ruanheyns/.govm/go/bin/go vet ./...
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
-/Users/ruanheyns/.govm/go/bin/go build ./cmd/terraform-provider-vew
+go clean -testcache
+go vet ./...
+go test ./... -race -count=1
+go build ./cmd/terraform-provider-vew
 terraform fmt -check -recursive examples
 git status --short
 ```

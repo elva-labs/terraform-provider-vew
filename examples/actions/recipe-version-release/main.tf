@@ -10,7 +10,7 @@ terraform {
 provider "vew" {}
 
 resource "vew_recipe" "example" {
-  project_id   = "prog-73488"
+  project_id   = "project-example"
   name         = "example-recipe-release"
   description  = "Recipe for the release action example"
   platform     = "Linux"

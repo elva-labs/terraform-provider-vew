@@ -199,12 +199,12 @@ func (f *VEWServer) handle(w http.ResponseWriter, request *http.Request) {
 	}
 
 	switch request.URL.Path {
-	case "/projects/prog-73488/components":
+	case "/projects/project-example/components":
 		if request.Method == http.MethodPost {
 			f.handleCreate(w, request)
 			return
 		}
-	case "/projects/prog-73488/components/cmp-123":
+	case "/projects/project-example/components/cmp-123":
 		switch request.Method {
 		case http.MethodGet:
 			f.handleGet(w)

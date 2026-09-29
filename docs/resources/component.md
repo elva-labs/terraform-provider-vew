@@ -15,7 +15,7 @@ Deleting this resource archives the component in VEW.
 
 ```terraform
 resource "vew_component" "example" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "example-component"
   description             = "Managed by Terraform"
   platform                = "Linux"
@@ -50,5 +50,5 @@ resource "vew_component" "example" {
 Import an existing component with `project_id/component_id`:
 
 ```shell
-terraform import vew_component.example prog-73488/cmp-123
+terraform import vew_component.example project-example/cmp-123
 ```

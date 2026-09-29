@@ -126,5 +126,5 @@ Optional:
 Import an existing project account assignment with `project_id/account_id`:
 
 ```shell
-terraform import vew_project_account.example prog-73488/account-123
+terraform import vew_project_account.example project-example/account-123
 ```

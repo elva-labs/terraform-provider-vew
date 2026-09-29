@@ -126,5 +126,5 @@ Optional:
 Import an existing pipeline with `project_id/pipeline_id`:
 
 ```shell
-terraform import vew_pipeline.example prog-73488/pipeline-123
+terraform import vew_pipeline.example project-example/pipeline-123
 ```

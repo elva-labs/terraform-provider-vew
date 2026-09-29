@@ -1,5 +1,5 @@
 resource "vew_component" "example" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "example-component-version-parent"
   description             = "Parent component managed by Terraform"
   platform                = "Linux"

@@ -40,9 +40,8 @@ provider "vew" {}
 
 ## Build and test
 
-The repository includes a Makefile using the Go toolchain at
-`/Users/ruanheyns/.govm/go/bin/go` by default. Override `GO` when using another
-installation:
+The repository includes a Makefile using `go` from `PATH` by default.
+Override `GO` to use another installation:
 
 ```shell
 make fmt
@@ -71,11 +70,11 @@ pages.
 The equivalent commands are:
 
 ```shell
-/Users/ruanheyns/.govm/go/bin/go mod tidy
-/Users/ruanheyns/.govm/go/bin/go fmt ./...
-/Users/ruanheyns/.govm/go/bin/go vet ./...
-/Users/ruanheyns/.govm/go/bin/go test ./... -race -count=1
-/Users/ruanheyns/.govm/go/bin/go build ./cmd/terraform-provider-vew
+go mod tidy
+go fmt ./...
+go vet ./...
+go test ./... -race -count=1
+go build ./cmd/terraform-provider-vew
 ```
 
 The unit and framework tests use local fakes and do not call VEW. The
@@ -98,7 +97,7 @@ TF_ACC=1 VEW_ACC_COMPONENT_VERSION=1 \
   VEW_API_URL=https://vew.example/api \
   VEW_TOKEN_URL=https://oauth.example/token \
   VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
-  VEW_TEST_PROJECT_ID=prog-73488 \
+  VEW_TEST_PROJECT_ID=project-example \
   make testacc-component-version
 ```
 
@@ -118,7 +117,7 @@ TF_ACC=1 VEW_ACC_RECIPE=1 \
   VEW_API_URL=https://vew.example/api \
   VEW_TOKEN_URL=https://oauth.example/token \
   VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
-  VEW_TEST_PROJECT_ID=prog-73488 \
+  VEW_TEST_PROJECT_ID=project-example \
   make testacc-recipe
 ```
 
@@ -139,7 +138,7 @@ TF_ACC=1 VEW_ACC_PIPELINE=1 \
   VEW_API_URL=https://vew.example/api \
   VEW_TOKEN_URL=https://oauth.example/token \
   VEW_CLIENT_ID=... VEW_CLIENT_SECRET=... \
-  VEW_TEST_PROJECT_ID=prog-73488 \
+  VEW_TEST_PROJECT_ID=project-example \
   VEW_TEST_RECIPE_ID=recipe-123 \
   VEW_TEST_RECIPE_VERSION_ID=version-456 \
   make testacc-pipeline
@@ -226,7 +225,7 @@ The complete example is in
 
 ```hcl
 resource "vew_component" "example" {
-  project_id              = "prog-73488"
+  project_id              = "project-example"
   name                    = "example-component"
   description             = "Managed by Terraform"
   platform                = "Linux"
@@ -271,7 +270,7 @@ before retrying so an accepted component is not accidentally duplicated.
 Import IDs use `project_id/component_id`:
 
 ```shell
-terraform import vew_component.example prog-73488/cmp-123
+terraform import vew_component.example project-example/cmp-123
 ```
 
 After import, Terraform refreshes the component and populates its computed
@@ -367,7 +366,7 @@ Terraform keeps the recipe in state so deletion can be retried.
 Recipe import IDs use `project_id/recipe_id`:
 
 ```shell
-terraform import vew_recipe.example prog-73488/recipe-123
+terraform import vew_recipe.example project-example/recipe-123
 ```
 
 Recipe create uses an idempotency key across transport retries. If VEW accepts
@@ -430,7 +429,7 @@ resource's Terraform configuration, including `[]` for an empty selection.
 Recipe-version import IDs use `project_id/recipe_id/version_id`:
 
 ```shell
-terraform import vew_recipe_version.example prog-73488/recipe-123/version-456
+terraform import vew_recipe_version.example project-example/recipe-123/version-456
 ```
 
 ## Release actions
@@ -535,7 +534,7 @@ Terraform read removes a missing (`404`) or retired pipeline from state. Import
 IDs use `project_id/pipeline_id` and only read the remote pipeline:
 
 ```shell
-terraform import vew_pipeline.example prog-73488/pipeline-123
+terraform import vew_pipeline.example project-example/pipeline-123
 ```
 
 If polling is interrupted after VEW accepts create or update, Terraform keeps

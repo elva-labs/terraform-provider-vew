@@ -15,7 +15,7 @@ platform fields require replacement.
 
 ```terraform
 resource "vew_recipe" "example" {
-  project_id   = "prog-73488"
+  project_id   = "project-example"
   name         = "example-recipe"
   description  = "Managed by Terraform"
   platform     = "Linux"
@@ -50,5 +50,5 @@ resource "vew_recipe" "example" {
 Import an existing recipe with `project_id/recipe_id`:
 
 ```shell
-terraform import vew_recipe.example prog-73488/recipe-123
+terraform import vew_recipe.example project-example/recipe-123
 ```

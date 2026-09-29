@@ -69,7 +69,7 @@ func TestComponentVersionLifecycleProtocolPreservesEquivalentConfiguration(t *te
 			version.Status, version.Description = status, description
 			responses[i] = testhelpers.VersionResponse{Version: version}
 		}
-		fake.QueueVersionActionReads(method, "prog-73488", "cmp-123", "version", responses...)
+		fake.QueueVersionActionReads(method, "project-example", "cmp-123", "version", responses...)
 	}
 	queue("POST", "created by provider test", "CREATING", "CREATED", "TESTING", "VALIDATED")
 	queue("PUT", "updated by provider test", "UPDATING", "CREATED", "TESTING", "VALIDATED")
@@ -77,7 +77,7 @@ func TestComponentVersionLifecycleProtocolPreservesEquivalentConfiguration(t *te
 	config := func(description string) string {
 		return fake.ProviderConfig() + fmt.Sprintf(`
 resource "vew_component_version" "test" {
-  project_id = "prog-73488"
+  project_id = "project-example"
   component_id = "cmp-123"
   description = %q
   release_type = "PATCH"
@@ -111,7 +111,7 @@ JSON
 			{Config: config("created by provider test"), PlanOnly: true, ExpectNonEmptyPlan: false},
 			{Config: config("updated by provider test"), Check: testresource.TestCheckResourceAttr("vew_component_version.test", "description", "updated by provider test")},
 			{Config: config("updated by provider test"), PlanOnly: true, ExpectNonEmptyPlan: false},
-			{ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "prog-73488/cmp-123/version",
+			{ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "project-example/cmp-123/version",
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 || states[0].ID != "version" || states[0].Attributes["release_type"] != "" {
 						return fmt.Errorf("import did not retain identity with unknown release type")
@@ -125,9 +125,9 @@ JSON
 func TestComponentVersionImportAdoptionProtocolDoesNotPut(t *testing.T) {
 	fake := testhelpers.NewVEWServer(t)
 	remote := vewcomponents.ComponentVersion{ID: "version", ComponentID: "cmp-123", Description: "created by provider test", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, Status: "VALIDATED"}
-	fake.QueueVersionReads("prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionReads("project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	remote.Status = "RETIRED"
-	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionActionReads("DELETE", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	config := fake.ProviderConfig() + strings.Replace(componentVersionResourceConfig(), `jsonencode({ phases = [] })`, fmt.Sprintf("%q", `{ "phases": [] }`), 1)
 	testresource.Test(t, testresource.TestCase{
 		IsUnitTest:               true,
@@ -142,7 +142,7 @@ func TestComponentVersionImportAdoptionProtocolDoesNotPut(t *testing.T) {
 		},
 		Steps: []testresource.TestStep{
 			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: true},
-			{Config: config, ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "prog-73488/cmp-123/version", ImportStatePersist: true},
+			{Config: config, ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "project-example/cmp-123/version", ImportStatePersist: true},
 			{Config: config, Check: testresource.TestCheckResourceAttr("vew_component_version.test", "release_type", "PATCH")},
 			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: false},
 		},
@@ -169,9 +169,9 @@ func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfig
 			{ComponentID: "b", ComponentName: "B", VersionID: "vb", VersionName: "2", Type: "HELPER", Order: 2},
 		},
 	}
-	fake.QueueVersionReads("prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionReads("project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	remote.Status = "RETIRED"
-	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionActionReads("DELETE", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	definition := `{ "phases": [ { "steps": [ {} ] } ] }`
 	config := fake.ProviderConfig() + strings.Replace(componentVersionResourceConfig(), `jsonencode({ phases = [] })`, fmt.Sprintf("%q", definition), 1)
 	config = strings.Replace(config, `software_version = "1.0"`, `software_version = "1.0"
@@ -201,7 +201,7 @@ func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfig
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"vew": providerserver.NewProtocol6WithError(&fastVersionProvider{Provider: rootprovider.New("test")()})},
 		Steps: []testresource.TestStep{
 			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: true},
-			{Config: config, ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "prog-73488/cmp-123/version", ImportStatePersist: true},
+			{Config: config, ResourceName: "vew_component_version.test", ImportState: true, ImportStateId: "project-example/cmp-123/version", ImportStatePersist: true},
 			{Config: config, Check: testresource.ComposeTestCheckFunc(
 				getOnly,
 				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "RELEASED"),
@@ -223,12 +223,12 @@ func TestComponentVersionReleasedImportAdoptionProtocolPreservesEquivalentConfig
 func TestComponentVersionFailedUpdateUnchangedReapplyRetriesProtocol(t *testing.T) {
 	fake := testhelpers.NewVEWServer(t)
 	remote := vewcomponents.ComponentVersion{ID: "version", ComponentID: "cmp-123", Description: "created by provider test", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, Status: "VALIDATED"}
-	fake.QueueVersionActionReads("POST", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionActionReads("POST", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	remote.Description, remote.Status = "attempted update", "FAILED"
-	fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionActionReads("PUT", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	retired := remote
 	retired.Status = "RETIRED"
-	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
+	fake.QueueVersionActionReads("DELETE", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
 	config := fake.ProviderConfig() + componentVersionResourceConfig()
 	updated := strings.Replace(config, "created by provider test", "attempted update", 1)
 	testresource.Test(t, testresource.TestCase{
@@ -239,7 +239,7 @@ func TestComponentVersionFailedUpdateUnchangedReapplyRetriesProtocol(t *testing.
 			{Config: updated, ExpectError: regexp.MustCompile(`reached FAILED`)},
 			{Config: updated, PreConfig: func() {
 				remote.Status = "VALIDATED"
-				fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+				fake.QueueVersionActionReads("PUT", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 			}, Check: testresource.ComposeTestCheckFunc(
 				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "VALIDATED"),
 				testresource.TestCheckResourceAttr("vew_component_version.test", "description", "attempted update"),
@@ -264,13 +264,13 @@ func TestComponentVersionFailedUpdateUnchangedReapplyRetriesProtocol(t *testing.
 func TestComponentVersionFailedUpdateRollbackReconcilesProtocol(t *testing.T) {
 	fake := testhelpers.NewVEWServer(t)
 	remote := vewcomponents.ComponentVersion{ID: "version", ComponentID: "cmp-123", Description: "configuration A", Name: "1.0.0", SoftwareVendor: "VEW", SoftwareVersion: "1.0", Definition: json.RawMessage(`{"phases":[]}`), Dependencies: []vewcomponents.Dependency{}, Status: "VALIDATED"}
-	fake.QueueVersionActionReads("POST", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+	fake.QueueVersionActionReads("POST", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 	failed := remote
 	failed.Description, failed.Status = "attempted configuration B", "FAILED"
-	fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: failed})
+	fake.QueueVersionActionReads("PUT", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: failed})
 	retired := remote
 	retired.Status = "RETIRED"
-	fake.QueueVersionActionReads("DELETE", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
+	fake.QueueVersionActionReads("DELETE", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: retired})
 	config := fake.ProviderConfig() + componentVersionResourceConfig()
 	rollback := strings.Replace(config, "created by provider test", "configuration A", 1)
 	attempted := strings.Replace(rollback, "configuration A", "attempted configuration B", 1)
@@ -283,7 +283,7 @@ func TestComponentVersionFailedUpdateRollbackReconcilesProtocol(t *testing.T) {
 			{Config: rollback, PlanOnly: true, ExpectNonEmptyPlan: true},
 			{Config: rollback, PreConfig: func() {
 				remote.Status = "VALIDATED"
-				fake.QueueVersionActionReads("PUT", "prog-73488", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
+				fake.QueueVersionActionReads("PUT", "project-example", "cmp-123", "version", testhelpers.VersionResponse{Version: remote})
 			}, Check: testresource.ComposeTestCheckFunc(
 				testresource.TestCheckResourceAttr("vew_component_version.test", "status", "VALIDATED"),
 				testresource.TestCheckResourceAttr("vew_component_version.test", "description", "configuration A"),
@@ -312,7 +312,7 @@ func TestComponentVersionFailedUpdateRollbackReconcilesProtocol(t *testing.T) {
 func componentVersionResourceConfig() string {
 	return `
 resource "vew_component_version" "test" {
-  project_id       = "prog-73488"
+  project_id       = "project-example"
   component_id     = "cmp-123"
   description      = "created by provider test"
   release_type     = "PATCH"

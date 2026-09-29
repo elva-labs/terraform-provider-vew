@@ -38,7 +38,7 @@ provider "vew" {
 }
 
 resource "vew_technology" "example" {
-  project_id   = "prog-73488"
+  project_id   = "project-example"
   name         = "example-technology"
   description  = "Managed by Terraform"
 
@@ -71,5 +71,5 @@ resource "vew_technology" "example" {
 Import an existing technology with `project_id/technology_id`:
 
 ```shell
-terraform import vew_technology.example prog-73488/tech-123
+terraform import vew_technology.example project-example/tech-123
 ```

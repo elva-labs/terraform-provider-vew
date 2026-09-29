@@ -12,7 +12,7 @@ provider "vew" {
 }
 
 resource "vew_technology" "example" {
-  project_id   = "prog-73488"
+  project_id   = "project-example"
   name         = "example-technology"
   description  = "Managed by Terraform"
 
