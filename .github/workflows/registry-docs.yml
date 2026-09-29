@@ -32,7 +32,7 @@ jobs:
           terraform_version: 1.16.3
           terraform_wrapper: false
       - name: Check Registry documentation
-        run: make docs-check
+        run: python3 scripts/registry_docs.py check
 
   tests:
     if: >-
@@ -67,4 +67,4 @@ jobs:
             fi
           fi
       - name: Run Go tests with the race detector
-        run: make test GO=go
+        run: go test ./... -race -count=1

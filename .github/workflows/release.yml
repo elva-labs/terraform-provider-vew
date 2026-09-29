@@ -43,8 +43,8 @@ jobs:
           fi
       - name: Check tests and Registry documentation
         run: |
-          make test GO=go
-          make docs-check
+          go test ./... -race -count=1
+          python3 scripts/registry_docs.py check
       - name: Validate release version and commit
         env:
           RELEASE_VERSION: ${{ inputs.version }}

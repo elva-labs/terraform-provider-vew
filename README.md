@@ -54,7 +54,7 @@ Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
-The GitHub Actions workflow runs this check and `make test GO=go` on pushes to
+The GitHub Actions workflow runs this check and the Go test suite on pushes to
 `main`. For a pull request from this repository into `main`, a teammate with
 label permission other than the PR author signals approval by adding the
 `runner-approved` label to start both jobs. After a new commit, remove and
