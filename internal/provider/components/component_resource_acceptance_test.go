@@ -17,6 +17,10 @@ import (
 const testAccComponentResourceName = "vew_component.test"
 
 func TestAccComponentResource(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("component acceptance test requires TF_ACC=1")
+	}
+
 	projectID := os.Getenv("VEW_PROJECT_ID")
 	name := fmt.Sprintf("tf-acc-%d", time.Now().UTC().UnixNano())
 	initialDescription := "created by Terraform acceptance test"

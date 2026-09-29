@@ -66,18 +66,11 @@ Registry pages in `docs/` are generated from the live provider schema and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
 The GitHub Actions workflow runs this check and the Go test suite on pushes to
-`main`. For a pull request from this repository into `main`, a teammate with
-label permission other than the PR author signals approval by adding the
-`runner-approved` label to start both jobs. After a new commit, remove and
-reapply the label to approve another run. The PR cannot change this approval
-gate because the label event uses the workflow from `main`. It uses Terraform
-1.16.3 and `tfplugindocs`
-v0.25.0. These jobs use the shared ARM Fargate Spot runner. Pull requests from
-forks do not run on that runner because it has access to the AWS environment.
-Runner compute is billed to the AWS account hosting the shared runners stack.
-Live acceptance tests remain separately gated. The historical
-design notes live in `design/superpowers/` so `docs/` contains only Registry
-pages.
+`main` and pull requests targeting `main`, including forks. It uses Terraform
+1.16.3 and `tfplugindocs` v0.25.0. These jobs run on GitHub-hosted ARM runners
+without access to VEW credentials. Live acceptance tests remain separately
+gated. The historical design notes live in `design/superpowers/` so `docs/`
+contains only Registry pages.
 
 The equivalent commands are:
 
