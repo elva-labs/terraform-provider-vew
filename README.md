@@ -1,6 +1,13 @@
 # Terraform Provider for VEW
 
-This proof-of-concept Terraform provider manages VEW components, component
+[Virtual Engineering Workbench (VEW)](https://github.com/awslabs/virtual-engineering-workbench)
+helps teams deliver self-service engineering environments on AWS. Platform
+engineers build machine images from reusable software components and recipes,
+publish them as products, and let developers launch ready-to-use workbenches.
+This provider puts the packaging workflow in Terraform so image definitions
+can be reviewed, repeated, and managed alongside other infrastructure.
+
+This proof-of-concept provider manages VEW components, component
 versions, recipes, recipe versions, image pipelines, project technologies, and
 AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
@@ -14,6 +21,11 @@ pipelines, and images, plus an explicitly invoked image-build action.
 
 - Go 1.27 or newer (the module declares `go 1.27.0`).
 - Terraform 1.16.3 for the documented local-development workflow.
+- A VEW deployment with the project-scoped S2S Packaging API and idempotency
+  support. These changes are in the
+  [Elva Labs fork](https://github.com/elva-labs/virtual-engineering-workbench),
+  but not yet in upstream VEW. See the
+  [Packaging API prerequisite](docs/guides/packaging-api.md).
 - VEW API credentials and a project in which to manage resources.
 
 The provider uses these environment variables when the corresponding provider

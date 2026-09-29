@@ -1,15 +1,28 @@
 ---
 page_title: "VEW Provider"
 description: |-
-  Manage VEW components, recipes, and pipelines with Terraform.
+  Manage Virtual Engineering Workbench packaging with Terraform.
 ---
 
 # VEW Provider
 
-The VEW provider manages components, component versions, recipes, recipe
-versions, image pipelines, project technologies, and project AWS account
-assignments. It also reads existing project objects and offers explicit
-actions for releasing versions and building images.
+[Virtual Engineering Workbench (VEW)](https://github.com/awslabs/virtual-engineering-workbench)
+is an AWS platform for building and delivering self-service virtual engineering
+environments. Platform engineers package software into machine images, publish
+those images as products, and let developers launch ready-to-use workbenches.
+This helps teams provide consistent development and test environments without
+each developer having to assemble one from scratch.
+
+This provider brings VEW's **packaging** workflow into Terraform. It manages
+components, component versions, recipes, recipe versions, and image pipelines;
+reads existing packaging objects; and offers explicit actions for releasing
+versions and building images. It also manages the project technologies and AWS
+account assignments needed for those workflows. The aim is to make workbench
+image definitions repeatable and reviewable alongside other infrastructure.
+
+The provider requires the project-scoped S2S Packaging API with idempotency
+support. See the [Packaging API prerequisite](guides/packaging-api.md) before
+connecting it to a VEW deployment.
 
 Provider configuration accepts OAuth client credentials in the arguments below
 or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`, `VEW_TOKEN_URL`,
