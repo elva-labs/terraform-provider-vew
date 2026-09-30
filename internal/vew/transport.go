@@ -18,7 +18,10 @@ const clientResponseBodyLimit = 2 << 20
 
 // Config configures the VEW API and OAuth clients. ProjectAPIURL is optional
 // and is used only by Projects clients; APIURL continues to target Packaging.
-type Config struct{ APIURL, ProjectAPIURL, TokenURL, ClientID, ClientSecret string }
+type Config struct {
+	APIURL, ProjectAPIURL, TokenURL, ClientID, ClientSecret string
+	ProjectClientBootstrap                                  bool
+}
 
 // Transport performs authenticated VEW HTTP requests.
 type Transport struct {

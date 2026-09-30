@@ -13,11 +13,12 @@ those images as products, and let developers launch ready-to-use workbenches.
 This helps teams provide consistent development and test environments without
 each developer having to assemble one from scratch.
 
-This provider brings VEW's **packaging** workflow into Terraform. It manages
+This provider brings VEW's **packaging and project access** workflows into Terraform. It manages
 components, component versions, recipes, recipe versions, and image pipelines;
 reads existing packaging objects; and offers explicit actions for releasing
-versions and building images. It also manages the project technologies and AWS
-account assignments needed for those workflows. The aim is to make workbench
+versions and building images. It also manages projects, direct user grants,
+Entra group grants, service-client grants, technologies, and AWS account
+assignments needed for those workflows. The aim is to make workbench
 image definitions repeatable and reviewable alongside other infrastructure.
 
 The provider requires the project-scoped S2S Packaging API with idempotency
@@ -33,6 +34,13 @@ and the scopes required by each operation. Technologies need
 `clients/projects/technology.read` and
 `clients/projects/technology.write`; project account assignments need
 `clients/projects/account.read` and `clients/projects/account.write`.
+Projects need `clients/projects/program.read|write`; direct users need
+`assignment.read|write`; Entra groups need `group_assignment.read|write`;
+service clients need `client_assignment.read|write`, all beneath
+`clients/projects/`. Project creation grants its creating client access.
+Existing projects require an active client assignment; a separately configured
+platform recovery client can use `client_assignment.bootstrap` for an orphaned
+project. See the [project access guide](guides/project-access.md).
 
 ## Example Usage
 
@@ -56,10 +64,13 @@ provider "vew" {}
 - `api_url` (String)
 - `client_id` (String)
 - `client_secret` (String, Sensitive)
+- `project_client_bootstrap` (Boolean) Request the client_assignment.bootstrap scope only for project client-assignment writes. Defaults to false; use with a separately granted platform recovery client.
 - `projects_api_url` (String)
 - `token_url` (String)
 
 See the [data source guide](guides/data-sources.md) for read scopes and behavior.
+See the [project access guide](guides/project-access.md) for imports, role
+resolution, bootstrap, and a gated disposable validation flow.
 Project accounts onboard asynchronously and may wait up to two hours by
 default. Deleting one deactivates its VEW assignment and does not offboard the
 AWS account. Actions must be invoked explicitly; declaring them does not mutate

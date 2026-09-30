@@ -1,0 +1,42 @@
+---
+page_title: "vew_project_assignment Resource - VEW"
+subcategory: ""
+description: |-
+  Manages one direct user assignment to a VEW project.
+---
+
+# vew_project_assignment (Resource)
+
+Manages a **direct** VEW role grant for one uppercase Entra user ID. Set
+`projects_api_url` and grant the provider client
+`clients/projects/assignment.read` and
+`clients/projects/assignment.write`, plus an active assignment to the project.
+`project_id` and `user_id` are immutable. Changes to roles are replaced on the
+same direct assignment; refresh reports direct roles only, so portal edits are
+visible as drift. The `roles` set must be nonempty.
+
+`user_email` and `user_display_name` are optional. Supply them for a user who
+has not signed in yet when the Projects API deployment accepts identity
+metadata. Imported assignments do not require these fields. Destroy removes
+only the direct assignment; any Entra group grants remain.
+
+A user's effective project roles are the union of direct roles and roles from
+all matching Entra group assignments. VEW evaluates group membership from the
+validated login claim. The human authorizer has TTL zero and reads trusted
+Cognito UserInfo on each request. Entra membership changes appear after a
+refreshed login updates the Cognito group attribute; an older token may carry
+the previous identity until expiry. Terraform does not sync group members.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Use `projectId/userId` with the uppercase user ID:
+
+```shell
+terraform import vew_project_assignment.exception proj-78uuo/01234567-89AB-CDEF-0123-456789ABCDEF
+```
