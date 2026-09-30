@@ -157,6 +157,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		projectAccountAPI = projectaccounts.NewClient(accountWriteTransport, accountReadTransport)
 	}
 	var productAPI products.API
+	var versionAPI *products.VersionClient
 	if config.PublishingAPIURL != "" {
 		publishingConfig := config
 		publishingConfig.APIURL = config.PublishingAPIURL
@@ -170,7 +171,18 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 			response.Diagnostics.AddError("Unable to configure VEW product client", "The VEW product read client could not be configured.")
 			return
 		}
+		versionPromoteTransport, err := vew.NewTransportWithScopes(publishingConfig, "clients/publishing/version.promote")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW product version client", "The VEW product version promote client could not be configured.")
+			return
+		}
+		versionReadTransport, err := vew.NewTransportWithScopes(publishingConfig, "clients/publishing/version.read")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW product version client", "The VEW product version read client could not be configured.")
+			return
+		}
 		productAPI = products.NewClient(productWriteTransport, productReadTransport)
+		versionAPI = products.NewVersionClient(versionPromoteTransport, versionReadTransport)
 	}
 	api := components.NewClient(transport)
 	componentReadAPI := components.NewClient(componentReadTransport)
@@ -203,6 +215,9 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		RecipeVersionReads:       recipeReadAPI,
 		RecipeVersionReleases:    recipeReleaseAPI,
 		Waiter:                   vew.NewWaiter(),
+	}
+	if versionAPI != nil {
+		data.Promotions, data.ProductVersionReads = versionAPI, versionAPI
 	}
 	response.ResourceData = data
 	response.DataSourceData = data
@@ -302,6 +317,7 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providertechnologies.NewTechnologyResource,
 		providerprojectaccounts.NewProjectAccountResource,
 		providerproducts.NewProductResource,
+		providerproducts.NewProductVersionPromotionResource,
 	}
 }
 
@@ -315,6 +331,7 @@ func (p *vewProvider) DataSources(context.Context) []func() datasource.DataSourc
 		providerimages.NewImageDataSource,
 		providerpipelines.NewPipelinesDataSource,
 		providerimages.NewImagesDataSource,
+		providerproducts.NewProductVersionsDataSource,
 	}
 }
 

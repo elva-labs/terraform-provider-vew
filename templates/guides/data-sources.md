@@ -16,6 +16,7 @@ does not itself request a token or call VEW.
 | `vew_component`, `vew_component_version` | `clients/packaging/component.read` |
 | `vew_recipe`, `vew_recipe_version` | `clients/packaging/recipe.read` |
 | `vew_pipeline`, `vew_pipelines`, `vew_image`, `vew_images` | `clients/packaging/pipeline.read` |
+| `vew_product_versions` (needs `publishing_api_url`) | `clients/publishing/version.read` |
 
 Exact data sources require explicit project and object identifiers. A missing
 object is an error. Collection data sources return an empty list when no

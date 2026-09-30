@@ -36,7 +36,8 @@ and the scopes required by each operation. Technologies need
 `clients/projects/technology.write`; project account assignments need
 `clients/projects/account.read` and `clients/projects/account.write`;
 products need `clients/publishing/product.read` and
-`clients/publishing/product.write`.
+`clients/publishing/product.write`; product version promotions need
+`clients/publishing/version.read` and `clients/publishing/version.promote`.
 
 ## Example Usage
 
