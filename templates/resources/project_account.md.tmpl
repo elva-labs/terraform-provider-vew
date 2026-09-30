@@ -23,6 +23,13 @@ Changing `project_id` or `aws_account_id` requires replacement. Changes to
 `name`, `description`, `account_type`, `technology_id`, `stage`, or `region`
 update the existing assignment in place and start re-onboarding.
 
+`onboarding_revision` re-runs onboarding without changing the configuration:
+set it to any new value (for example a date or the revision of the stacks VEW
+deploys into the account) and the next apply asks VEW to onboard the account
+again. VEW stores the value and never interprets it. Leaving the attribute unset,
+or removing it later, never triggers onboarding by itself. It needs a VEW version
+whose Projects API accepts `onboardingRevision`.
+
 Deleting this resource deactivates the VEW project assignment. It does not
 remove the AWS account, undo onboarding, or perform AWS offboarding. The account
 association remains retained by VEW and can keep its technology referenced.

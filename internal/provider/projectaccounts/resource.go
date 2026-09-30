@@ -21,12 +21,13 @@ import (
 )
 
 var (
-	_               resource.Resource                   = (*projectAccountResource)(nil)
-	_               resource.ResourceWithConfigure      = (*projectAccountResource)(nil)
-	_               resource.ResourceWithValidateConfig = (*projectAccountResource)(nil)
-	_               resource.ResourceWithImportState    = (*projectAccountResource)(nil)
-	awsRegion                                           = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]$`)
-	safeCorrelation                                     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+	_                  resource.Resource                   = (*projectAccountResource)(nil)
+	_                  resource.ResourceWithConfigure      = (*projectAccountResource)(nil)
+	_                  resource.ResourceWithValidateConfig = (*projectAccountResource)(nil)
+	_                  resource.ResourceWithImportState    = (*projectAccountResource)(nil)
+	awsRegion                                              = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]$`)
+	safeCorrelation                                        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+	onboardingRevision                                     = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 )
 
 const createKeyName = "project_account_create_idempotency_key"
@@ -115,6 +116,7 @@ func (r *projectAccountResource) Create(ctx context.Context, req resource.Create
 	action, err := r.client.CreateAccount(ctx, m.ProjectID.ValueString(), vewaccounts.AccountInput{
 		AWSAccountID: m.AWSAccountID.ValueString(), AccountType: m.AccountType.ValueString(), Name: m.Name.ValueString(),
 		Description: m.Description.ValueString(), TechnologyID: m.TechnologyID.ValueString(), Stage: m.Stage.ValueString(), Region: m.Region.ValueString(),
+		OnboardingRevision: m.OnboardingRevision.ValueString(),
 	}, key)
 	if err != nil {
 		addAccountError(&resp.Diagnostics, "create", err, "")
@@ -229,6 +231,7 @@ func (r *projectAccountResource) Update(ctx context.Context, req resource.Update
 	action, err := r.client.UpdateAccount(ctx, m.ProjectID.ValueString(), m.ID.ValueString(), vewaccounts.UpdateAccountInput{
 		AccountType: plan.AccountType.ValueString(), Name: plan.Name.ValueString(), Description: plan.Description.ValueString(),
 		TechnologyID: plan.TechnologyID.ValueString(), Stage: plan.Stage.ValueString(), Region: plan.Region.ValueString(),
+		OnboardingRevision: plan.OnboardingRevision.ValueString(),
 	})
 	if err != nil {
 		addAccountError(&resp.Diagnostics, "update", err, m.ID.ValueString())
@@ -349,6 +352,11 @@ func setState(ctx context.Context, m *model, a vewaccounts.Account) error {
 	m.LastOnboardingResult = types.StringValue(a.LastOnboardingResult)
 	m.LastOnboardingError = sanitizedOnboardingError(a.LastOnboardingResult, a.LastOnboardingErrorMessage)
 	m.CreatedAt, m.UpdatedAt = dateValue(a.CreatedAt), dateValue(a.UpdatedAt)
+	// Only a managed revision is tracked: an unset one stays null even when VEW stores one, because
+	// an omitted revision never changes VEW's (no perpetual diff after removing it from config).
+	if !m.OnboardingRevision.IsNull() && !m.OnboardingRevision.IsUnknown() {
+		m.OnboardingRevision = optionalString(a.OnboardingRevision)
+	}
 	_ = ctx
 	return nil
 }
@@ -406,15 +414,31 @@ func safeStatus(s string) string {
 	return "terminal"
 }
 func sameDesired(a, b model) bool {
-	return a.AccountType.Equal(b.AccountType) && a.Name.Equal(b.Name) && a.Description.Equal(b.Description) && a.TechnologyID.Equal(b.TechnologyID) && a.Stage.Equal(b.Stage) && a.Region.Equal(b.Region)
+	return a.AccountType.Equal(b.AccountType) && a.Name.Equal(b.Name) && a.Description.Equal(b.Description) && a.TechnologyID.Equal(b.TechnologyID) && a.Stage.Equal(b.Stage) && a.Region.Equal(b.Region) && sameRevision(a.OnboardingRevision, b.OnboardingRevision)
 }
+
+// sameRevision treats removing onboarding_revision from config as no change: VEW keeps its stored
+// revision when none is sent, so there is nothing to apply.
+func sameRevision(current, desired types.String) bool {
+	return desired.IsNull() || current.Equal(desired)
+}
+
 func copyDesired(a *model, b model) {
 	a.AccountType, a.Name, a.Description, a.TechnologyID, a.Stage, a.Region = b.AccountType, b.Name, b.Description, b.TechnologyID, b.Stage, b.Region
+	a.OnboardingRevision = b.OnboardingRevision
 }
 
 func preserveMutable(target *model, previous model) {
 	target.AccountType, target.Name, target.Description = previous.AccountType, previous.Name, previous.Description
 	target.TechnologyID, target.Stage, target.Region = previous.TechnologyID, previous.Stage, previous.Region
+	target.OnboardingRevision = previous.OnboardingRevision
+}
+
+func optionalString(value string) types.String {
+	if value == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(value)
 }
 
 func mutableKnown(m model) bool {

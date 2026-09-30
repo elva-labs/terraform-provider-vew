@@ -36,6 +36,10 @@ resource "vew_project_account" "example" {
   stage          = "dev"
   region         = "eu-west-1"
 
+  # Optional: change it to onboard the account again with the same configuration, for example
+  # after the account stacks VEW deploys have changed.
+  onboarding_revision = "1"
+
   timeouts = {
     create = "2h"
     update = "2h"
