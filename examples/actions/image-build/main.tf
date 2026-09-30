@@ -13,9 +13,9 @@ provider "vew" {}
 # only when you intentionally request another image build.
 action "vew_image_build" "example" {
   config {
-    project_id       = "your-project-id"
-    pipeline_id      = "your-existing-pipeline-id"
-    idempotency_key  = "90827b61-8399-4d8a-9843-d75d1556fed0"
-    timeout_minutes  = 120
+    project_id      = "your-project-id"
+    pipeline_id     = "your-existing-pipeline-id"
+    idempotency_key = "90827b61-8399-4d8a-9843-d75d1556fed0"
+    timeout_minutes = 120
   }
 }

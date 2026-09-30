@@ -29,12 +29,12 @@ provider "vew" {
 resource "vew_project_account" "example" {
   project_id     = var.project_id
   aws_account_id = var.aws_account_id
-  account_type  = "USER"
-  name          = "example-development-account"
-  description   = "Managed by Terraform"
-  technology_id = var.technology_id
-  stage         = "dev"
-  region        = "eu-west-1"
+  account_type   = "USER"
+  name           = "example-development-account"
+  description    = "Managed by Terraform"
+  technology_id  = var.technology_id
+  stage          = "dev"
+  region         = "eu-west-1"
 
   timeouts = {
     create = "2h"
