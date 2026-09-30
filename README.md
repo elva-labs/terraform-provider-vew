@@ -52,6 +52,9 @@ provider "vew" {}
 
 ## Build and test
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request and maintainer
+review process, and [SECURITY.md](SECURITY.md) for private vulnerability reports.
+
 The repository includes a Makefile using `go` from `PATH` by default.
 Override `GO` to use another installation:
 
