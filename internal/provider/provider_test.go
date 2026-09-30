@@ -242,7 +242,7 @@ func TestProviderConfigureDoesNotMakeNetworkRequests(t *testing.T) {
 	if !ok || data.Technologies == nil || data.ProjectAccounts == nil || data.ProjectAPIURL != "http://127.0.0.1:1/projects" {
 		t.Fatalf("expected Projects clients to be configured without connecting, got %#v", response.ResourceData)
 	}
-	if data.Products == nil || data.PublishingAPIURL != "http://127.0.0.1:1/publishing" {
+	if data.Products == nil || data.Promotions == nil || data.ProductVersionReads == nil || data.PublishingAPIURL != "http://127.0.0.1:1/publishing" {
 		t.Fatalf("expected Publishing clients to be configured without connecting, got %#v", response.ResourceData)
 	}
 }
@@ -623,7 +623,7 @@ func TestProviderResourcesIncludesTechnologyAndProjectAccount(t *testing.T) {
 	t.Parallel()
 
 	resources := New("test")().Resources(context.Background())
-	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_product"}
+	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_product", "vew_product_version_promotion"}
 	if len(resources) != len(want) {
 		t.Fatalf("resource constructors = %d, want %d", len(resources), len(want))
 	}
@@ -649,6 +649,7 @@ func TestProviderDataSourcesIncludesExactSet(t *testing.T) {
 		"vew_image",
 		"vew_pipelines",
 		"vew_images",
+		"vew_product_versions",
 	}
 	if len(dataSources) != len(want) {
 		t.Fatalf("data source constructors = %d, want %d", len(dataSources), len(want))

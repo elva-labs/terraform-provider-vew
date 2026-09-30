@@ -12,7 +12,8 @@ versions, recipes, recipe versions, image pipelines, project technologies, and
 AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
 `vew_recipe_version`, `vew_pipeline`, `vew_technology`,
-`vew_project_account`, and `vew_product` resources.
+`vew_project_account`, `vew_product`, and `vew_product_version_promotion`
+resources.
 
 It also provides read-only data sources for components, versions, recipes,
 pipelines, and images, plus an explicitly invoked image-build action.
@@ -607,6 +608,14 @@ assignment to the project and the `clients/publishing/product.read` and
 `project_id/product_id`. The product's `type` (`WORKBENCH`, `VIRTUAL_TARGET`,
 or `CONTAINER`) and `technology_id` are fixed; changing them replaces the
 product. Deleting it archives the product and unpublishes all of its versions.
+
+`vew_product_version_promotion` promotes a product version to `DEV`, `QA`, or
+`PROD` and waits until it is published in the stage's accounts. It needs
+`clients/publishing/version.read` and `clients/publishing/version.promote`.
+Import IDs are `project_id/product_id/version_id/stage`. Destroying it only
+removes it from Terraform; VEW does not undo a release. The
+`vew_product_versions` data source lists a product's versions and their stages
+with `clients/publishing/version.read`.
 
 ## Data sources
 
