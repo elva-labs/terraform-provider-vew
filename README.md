@@ -61,6 +61,11 @@ make test
 make build
 ```
 
+Pull requests into `main` also run `make vet`, a `gofmt` check,
+`make docs-check`, and `make examples-check`, which validates every example
+under `examples/` against the provider built from the checkout (Terraform on
+`PATH`).
+
 Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and
 commit the resulting pages. Run `make docs-check` to regenerate into a
