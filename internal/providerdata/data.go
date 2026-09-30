@@ -26,6 +26,7 @@ type Data struct {
 	ProjectAPIURL            string
 	Technologies             technologies.API
 	ProjectAccounts          projectaccounts.API
+	ProjectAccountReads      projectaccounts.ListAPI
 	ProjectAccess            projectaccess.API
 	ProjectSettings          projectsettings.API
 	BaseImages               baseimages.API

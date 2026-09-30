@@ -650,6 +650,7 @@ func TestProviderDataSourcesIncludesExactSet(t *testing.T) {
 		"vew_pipelines",
 		"vew_images",
 		"vew_product_versions",
+		"vew_project_accounts",
 	}
 	if len(dataSources) != len(want) {
 		t.Fatalf("data source constructors = %d, want %d", len(dataSources), len(want))
