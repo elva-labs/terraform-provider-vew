@@ -11,6 +11,13 @@ Manages a project recipe. Terraform updates its description in place and
 archives it when the resource is deleted. Changes to its identifying and
 platform fields require replacement.
 
+`platform` and `architecture` must be `Linux` with `amd64` or `arm64`, or
+`Windows` with `amd64`. `os_version` names an OS entry of the VEW deployment,
+such as `Ubuntu 24`, `Microsoft Windows Server 2025`, or a custom entry the
+deployment adds to its system configuration mapping (for example an
+organization's own base image). The provider does not restrict it to a fixed
+list; VEW rejects entries the deployment does not offer.
+
 ## Example Usage
 
 ```terraform
