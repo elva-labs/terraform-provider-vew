@@ -38,7 +38,8 @@ func TestClientPathsAndScopeIsolation(t *testing.T) {
 			}
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if !reflect.DeepEqual(body, map[string]any{"name": "name", "description": nil, "isActive": true}) {
+			// An unset description is omitted, not sent as null.
+			if !reflect.DeepEqual(body, map[string]any{"name": "name", "isActive": true}) {
 				t.Errorf("project body %#v", body)
 			}
 			_, _ = io.WriteString(w, `{"projectId":"proj-1"}`)
@@ -115,5 +116,24 @@ func TestClientPathsAndScopeIsolation(t *testing.T) {
 	}
 	if len(seen) != len(scopes) {
 		t.Fatalf("saw %d of %d routes", len(seen), len(scopes))
+	}
+}
+
+func TestProjectInputOmitsUnsetDescription(t *testing.T) {
+	description := "text"
+	for _, tc := range []struct {
+		input ProjectInput
+		want  string
+	}{
+		{ProjectInput{Name: "name", IsActive: true}, `{"name":"name","isActive":true}`},
+		{ProjectInput{Name: "name", Description: &description, IsActive: true}, `{"name":"name","description":"text","isActive":true}`},
+	} {
+		got, err := json.Marshal(tc.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("got %s, want %s", got, tc.want)
+		}
 	}
 }
