@@ -38,9 +38,9 @@ provider "vew" {
 }
 
 resource "vew_technology" "example" {
-  project_id   = "project-example"
-  name         = "example-technology"
-  description  = "Managed by Terraform"
+  project_id  = "project-example"
+  name        = "example-technology"
+  description = "Managed by Terraform"
 
   lifecycle {
     prevent_destroy = true

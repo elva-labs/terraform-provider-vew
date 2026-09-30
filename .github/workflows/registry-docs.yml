@@ -52,3 +52,29 @@ jobs:
           fi
       - name: Run Go tests with the race detector
         run: go test ./... -race -count=1
+
+  static:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - name: Run go vet
+        run: go vet ./...
+      - name: Validate examples
+        run: python3 scripts/validate_examples.py
