@@ -623,7 +623,7 @@ func TestProviderResourcesIncludesTechnologyAndProjectAccount(t *testing.T) {
 	t.Parallel()
 
 	resources := New("test")().Resources(context.Background())
-	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_product", "vew_product_version_promotion"}
+	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_project_management", "vew_project_workbench_lifecycle", "vew_base_image_release", "vew_product", "vew_product_version_promotion"}
 	if len(resources) != len(want) {
 		t.Fatalf("resource constructors = %d, want %d", len(resources), len(want))
 	}

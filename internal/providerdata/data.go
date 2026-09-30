@@ -2,12 +2,14 @@ package providerdata
 
 import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/baseimages"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectsettings"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
 )
@@ -25,6 +27,8 @@ type Data struct {
 	Technologies             technologies.API
 	ProjectAccounts          projectaccounts.API
 	ProjectAccess            projectaccess.API
+	ProjectSettings          projectsettings.API
+	BaseImages               baseimages.API
 	PublishingAPIURL         string
 	Products                 products.API
 	Promotions               products.PromotionAPI
