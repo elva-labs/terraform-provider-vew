@@ -224,7 +224,10 @@ func TestRecipeResourceValidate(t *testing.T) {
 		{"ubuntu arm64", "Linux", "arm64", "Ubuntu 24", "valid", ""},
 		{"windows amd64", "Windows", "amd64", "Microsoft Windows Server 2025", "valid", ""},
 		{"windows arm64", "Windows", "arm64", "Microsoft Windows Server 2025", "valid", "Unsupported recipe system"},
-		{"other os", "Linux", "amd64", "Ubuntu 22", "valid", "Unsupported recipe system"},
+		{"deployment os entry", "Linux", "arm64", "Custom Ubuntu 24.04 base", "valid", ""},
+		{"linux unknown architecture", "Linux", "riscv64", "Ubuntu 24", "valid", "Unsupported recipe system"},
+		{"unknown platform", "macOS", "arm64", "Ubuntu 24", "valid", "Unsupported recipe system"},
+		{"blank os version", "Linux", "amd64", " ", "valid", "os_version must be non-empty"},
 		{"blank description", "Linux", "amd64", "Ubuntu 24", " ", "description must be non-empty"},
 	}
 	for _, tc := range cases {
