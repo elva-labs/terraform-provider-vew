@@ -10,9 +10,13 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 )
 
+// ProjectInput is the desired project. An unset Description is omitted rather than sent as null:
+// VEW treats a missing description as none, while API Gateway's request validator (JSON Schema
+// draft 4) may reject null for a field typed as string even when the OpenAPI schema declares it
+// nullable.
 type ProjectInput struct {
 	Name        string  `json:"name"`
-	Description *string `json:"description"`
+	Description *string `json:"description,omitempty"`
 	IsActive    bool    `json:"isActive"`
 }
 type Project struct {
