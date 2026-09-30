@@ -73,11 +73,11 @@ Registry pages in `docs/` are generated from the live provider schema and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
 The GitHub Actions workflow runs this check and the Go test suite on pushes to
-`main` and pull requests targeting `main`, including forks. It uses Terraform
-1.16.3 and `tfplugindocs` v0.25.0. These jobs run on GitHub-hosted ARM runners
-without access to VEW credentials. Live acceptance tests remain separately
-gated. The historical design notes live in `design/superpowers/` so `docs/`
-contains only Registry pages.
+`main` and `beta`, and pull requests targeting either branch, including forks.
+It uses Terraform 1.16.3 and `tfplugindocs` v0.25.0. These jobs run on
+GitHub-hosted ARM runners without access to VEW credentials. Live acceptance
+tests remain separately gated. The historical design notes live in
+`design/superpowers/` so `docs/` contains only Registry pages.
 
 The equivalent commands are:
 
@@ -632,10 +632,24 @@ enter a new version tag:
 The workflow rejects versions that do not match the branch and commits that
 are no longer the branch tip. It reruns tests and the docs check on a
 GitHub-hosted ARM runner, creates the tag on that commit, then uses GoReleaser
-to publish a GitHub Release. Beta releases are marked as prereleases and do
-not replace GitHub's latest stable release. To graduate a beta, merge `beta`
-into `main` and publish the stable version, such as `v0.2.0`. Do not move or
-replace a published version tag; release a new version for corrections.
+to publish a GitHub Release. Beta releases keep the `-beta.N` version suffix
+and do not replace GitHub's latest stable release. The GitHub prerelease
+checkbox is left off during publication so the Terraform Registry can index
+the release. Terraform recognizes the beta from its version suffix and
+requires an exact version constraint to install it.
+
+After publication, confirm that the new version appears in the Registry and
+installs with `terraform init -upgrade`. If it is missing, use **Resync** in
+the provider's Registry settings with the GitHub prerelease checkbox still
+off. During publication of `v0.2.0-beta.1`, the Registry returned
+`Ignored draft release event` when the GitHub prerelease checkbox was enabled;
+the version was indexed after clearing it and resyncing. Once indexed, the
+GitHub prerelease checkbox can optionally be enabled. See the
+[reported Registry prerelease issue](https://discuss.hashicorp.com/t/publishing-pre-release-versions-of-provider-ignored-draft-release-event/69536).
+
+To graduate a beta, merge `beta` into `main` and publish the stable version,
+such as `v0.2.0`. Do not move or replace a published version tag; release a
+new version for corrections.
 
 Create `beta` from a commit containing this workflow before releasing from
 that branch. Both release types publish under the same `elva-labs/vew`
