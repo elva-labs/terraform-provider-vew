@@ -11,8 +11,8 @@ This proof-of-concept provider manages VEW components, component
 versions, recipes, recipe versions, image pipelines, project technologies, and
 AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
-`vew_recipe_version`, `vew_pipeline`, `vew_technology`, and
-`vew_project_account` resources.
+`vew_recipe_version`, `vew_pipeline`, `vew_technology`,
+`vew_project_account`, and `vew_product` resources.
 
 It also provides read-only data sources for components, versions, recipes,
 pipelines, and images, plus an explicitly invoked image-build action.
@@ -35,6 +35,7 @@ attribute is omitted or empty:
 | --- | --- | --- |
 | `api_url` | `VEW_API_URL` | Absolute VEW API HTTP(S) URL, including `/clients/packaging/v1` (the provider appends `/projects/...`) |
 | `projects_api_url` | `VEW_PROJECTS_API_URL` | Absolute VEW Projects API HTTP(S) URL (used by technologies and account assignments) |
+| `publishing_api_url` | `VEW_PUBLISHING_API_URL` | Absolute VEW Publishing API HTTP(S) URL (used by products) |
 | `token_url` | `VEW_TOKEN_URL` | Absolute OAuth token HTTP(S) URL |
 | `client_id` | `VEW_CLIENT_ID` | OAuth client ID |
 | `client_secret` | `VEW_CLIENT_SECRET` | OAuth client secret (sensitive) |
@@ -591,6 +592,16 @@ active. Examples are in
 [`examples/resources/vew_technology/resource.tf`](examples/resources/vew_technology/resource.tf)
 and
 [`examples/resources/vew_project_account/resource.tf`](examples/resources/vew_project_account/resource.tf).
+
+## Publishing API resources
+
+The `vew_product` resource uses the Publishing API URL from
+`publishing_api_url` or `VEW_PUBLISHING_API_URL`. It needs an active
+assignment to the project and the `clients/publishing/product.read` and
+`clients/publishing/product.write` scopes. Import IDs are
+`project_id/product_id`. The product's `type` (`WORKBENCH`, `VIRTUAL_TARGET`,
+or `CONTAINER`) and `technology_id` are fixed; changing them replaces the
+product. Deleting it archives the product and unpublishes all of its versions.
 
 ## Data sources
 

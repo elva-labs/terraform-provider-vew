@@ -18,7 +18,8 @@ components, component versions, recipes, recipe versions, and image pipelines;
 reads existing packaging objects; and offers explicit actions for releasing
 versions and building images. It also manages projects, direct user grants,
 Entra group grants, service-client grants, technologies, and AWS account
-assignments needed for those workflows. The aim is to make workbench
+assignments needed for those workflows, and the products that users launch
+from the built images. The aim is to make workbench
 image definitions repeatable and reviewable alongside other infrastructure.
 
 The provider requires the project-scoped S2S Packaging API with idempotency
@@ -26,14 +27,17 @@ support. See the [Packaging API prerequisite](guides/packaging-api.md) before
 connecting it to a VEW deployment.
 
 Provider configuration accepts OAuth client credentials in the arguments below
-or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`, `VEW_TOKEN_URL`,
-`VEW_CLIENT_ID`, and `VEW_CLIENT_SECRET` environment variables. `api_url`
-includes `/clients/packaging/v1`; `projects_api_url` points to the Projects
-API endpoint. The caller also needs an active assignment to the VEW project
+or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`,
+`VEW_PUBLISHING_API_URL`, `VEW_TOKEN_URL`, `VEW_CLIENT_ID`, and
+`VEW_CLIENT_SECRET` environment variables. `api_url` includes
+`/clients/packaging/v1`; `projects_api_url` points to the Projects API
+endpoint and `publishing_api_url` to the Publishing API endpoint. The caller also needs an active assignment to the VEW project
 and the scopes required by each operation. Technologies need
 `clients/projects/technology.read` and
 `clients/projects/technology.write`; project account assignments need
-`clients/projects/account.read` and `clients/projects/account.write`.
+`clients/projects/account.read` and `clients/projects/account.write`;
+products need `clients/publishing/product.read` and
+`clients/publishing/product.write`.
 Projects need `clients/projects/program.read|write`; direct users need
 `assignment.read|write`; Entra groups need `group_assignment.read|write`;
 service clients need `client_assignment.read|write`, all beneath
@@ -66,6 +70,7 @@ provider "vew" {}
 - `client_secret` (String, Sensitive)
 - `project_client_bootstrap` (Boolean) Request the client_assignment.bootstrap scope only for project client-assignment writes. Defaults to false; use with a separately granted platform recovery client.
 - `projects_api_url` (String)
+- `publishing_api_url` (String)
 - `token_url` (String)
 
 See the [data source guide](guides/data-sources.md) for read scopes and behavior.

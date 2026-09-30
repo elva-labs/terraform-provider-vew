@@ -10,6 +10,7 @@ import (
 	providerimageactions "github.com/elva-labs/terraform-provider-vew/internal/provider/imageactions"
 	providerimages "github.com/elva-labs/terraform-provider-vew/internal/provider/images"
 	providerpipelines "github.com/elva-labs/terraform-provider-vew/internal/provider/pipelines"
+	providerproducts "github.com/elva-labs/terraform-provider-vew/internal/provider/products"
 	providerprojectaccess "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccess"
 	providerprojectaccounts "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccounts"
 	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
@@ -20,6 +21,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
@@ -42,6 +44,7 @@ type vewProvider struct {
 type providerModel struct {
 	APIURL                 types.String `tfsdk:"api_url"`
 	ProjectsAPIURL         types.String `tfsdk:"projects_api_url"`
+	PublishingURL          types.String `tfsdk:"publishing_api_url"`
 	TokenURL               types.String `tfsdk:"token_url"`
 	ClientID               types.String `tfsdk:"client_id"`
 	ClientSecret           types.String `tfsdk:"client_secret"`
@@ -64,6 +67,7 @@ func (p *vewProvider) Schema(_ context.Context, _ provider.SchemaRequest, respon
 		Attributes: map[string]schema.Attribute{
 			"api_url":                  schema.StringAttribute{Optional: true},
 			"projects_api_url":         schema.StringAttribute{Optional: true},
+			"publishing_api_url":       schema.StringAttribute{Optional: true},
 			"token_url":                schema.StringAttribute{Optional: true},
 			"client_id":                schema.StringAttribute{Optional: true},
 			"client_secret":            schema.StringAttribute{Optional: true, Sensitive: true},
@@ -198,6 +202,22 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		}
 		projectAccessAPI = projectaccess.NewClient(programPair, userPair, groupPair, clientPair)
 	}
+	var productAPI products.API
+	if config.PublishingAPIURL != "" {
+		publishingConfig := config
+		publishingConfig.APIURL = config.PublishingAPIURL
+		productWriteTransport, err := vew.NewTransportWithScopes(publishingConfig, "clients/publishing/product.write")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW product client", "The VEW product write client could not be configured.")
+			return
+		}
+		productReadTransport, err := vew.NewTransportWithScopes(publishingConfig, "clients/publishing/product.read")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW product client", "The VEW product read client could not be configured.")
+			return
+		}
+		productAPI = products.NewClient(productWriteTransport, productReadTransport)
+	}
 	api := components.NewClient(transport)
 	componentReadAPI := components.NewClient(componentReadTransport)
 	recipeAPI := recipes.NewClient(recipeTransport)
@@ -220,6 +240,8 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		Technologies:             technologyAPI,
 		ProjectAccounts:          projectAccountAPI,
 		ProjectAccess:            projectAccessAPI,
+		PublishingAPIURL:         config.PublishingAPIURL,
+		Products:                 productAPI,
 		Pipelines:                pipelineAPI,
 		PipelineReads:            pipelineReadAPI,
 		Recipes:                  recipeAPI,
@@ -288,11 +310,28 @@ func resolveProviderConfig(model providerModel, getenv func(string) (string, boo
 	} else if !model.ProjectClientBootstrap.IsNull() {
 		config.ProjectClientBootstrap = model.ProjectClientBootstrap.ValueBool()
 	}
+	// Publishing resources are optional in the same way.
+	if model.PublishingURL.IsUnknown() {
+		diagnostics.AddError("Unknown provider configuration", "publishing_api_url must be known; configure it explicitly or through VEW_PUBLISHING_API_URL.")
+	} else {
+		publishingAPIURL := ""
+		if !model.PublishingURL.IsNull() {
+			publishingAPIURL = strings.TrimSpace(model.PublishingURL.ValueString())
+		}
+		if publishingAPIURL == "" {
+			publishingAPIURL, _ = getenv("VEW_PUBLISHING_API_URL")
+			publishingAPIURL = strings.TrimSpace(publishingAPIURL)
+		}
+		config.PublishingAPIURL = publishingAPIURL
+	}
 	if config.APIURL != "" && !validHTTPURL(config.APIURL) {
 		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTP or HTTPS URL.")
 	}
 	if config.ProjectAPIURL != "" && !validHTTPURL(config.ProjectAPIURL) {
 		diagnostics.AddError("Invalid provider configuration", "projects_api_url must be an absolute HTTP or HTTPS URL.")
+	}
+	if config.PublishingAPIURL != "" && !validHTTPURL(config.PublishingAPIURL) {
+		diagnostics.AddError("Invalid provider configuration", "publishing_api_url must be an absolute HTTP or HTTPS URL.")
 	}
 	if config.TokenURL != "" && !validHTTPURL(config.TokenURL) {
 		diagnostics.AddError("Invalid provider configuration", "token_url must be an absolute HTTP or HTTPS URL.")
@@ -318,6 +357,7 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providerprojectaccess.NewUserResource,
 		providerprojectaccess.NewGroupResource,
 		providerprojectaccess.NewClientResource,
+		providerproducts.NewProductResource,
 	}
 }
 

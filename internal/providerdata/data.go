@@ -5,6 +5,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
@@ -24,6 +25,8 @@ type Data struct {
 	Technologies             technologies.API
 	ProjectAccounts          projectaccounts.API
 	ProjectAccess            projectaccess.API
+	PublishingAPIURL         string
+	Products                 products.API
 	Pipelines                pipelines.API
 	PipelineReads            pipelines.ReadAPI
 	Recipes                  recipes.RecipeAPI
