@@ -61,6 +61,13 @@ make test
 make build
 ```
 
+Projects and access can be managed with `vew_project`,
+`vew_project_assignment`, `vew_project_group_assignment`, and
+`vew_project_client_assignment`. See the [project access guide](docs/guides/project-access.md)
+for scopes, import IDs, bootstrap, role resolution, and disposable validation.
+Recovery clients must explicitly set `project_client_bootstrap = true` on a
+separate provider alias; ordinary configurations leave it unset.
+
 Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and
 commit the resulting pages. Run `make docs-check` to regenerate into a
