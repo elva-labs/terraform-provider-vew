@@ -31,6 +31,7 @@ type model struct {
 	LastOnboardingError  types.String `tfsdk:"last_onboarding_error"`
 	CreatedAt            types.String `tfsdk:"created_at"`
 	UpdatedAt            types.String `tfsdk:"updated_at"`
+	OnboardingRevision   types.String `tfsdk:"onboarding_revision"`
 	Timeouts             types.Object `tfsdk:"timeouts"`
 }
 
@@ -59,6 +60,9 @@ func resourceSchema() schema.Schema {
 		"last_onboarding_result": schema.StringAttribute{Computed: true},
 		"last_onboarding_error":  schema.StringAttribute{Computed: true, Sensitive: true},
 		"created_at":             schema.StringAttribute{Computed: true}, "updated_at": schema.StringAttribute{Computed: true},
+		"onboarding_revision": schema.StringAttribute{Optional: true, Description: "Opaque revision of the account's onboarding. " +
+			"Changing it re-runs VEW's onboarding for the unchanged configuration, for example to roll out updated account stacks. " +
+			"Up to 128 letters, digits and `.`, `_`, `:` or `-`. Leaving it unset never triggers onboarding by itself."},
 		"timeouts": schema.SingleNestedAttribute{Optional: true, Attributes: map[string]schema.Attribute{
 			"create": schema.StringAttribute{Optional: true, Description: "Timeout for account onboarding. Defaults to 2h."},
 			"update": schema.StringAttribute{Optional: true, Description: "Timeout for account re-onboarding. Defaults to 2h."},
@@ -90,6 +94,9 @@ func validateModel(ctx context.Context, m model) diag.Diagnostics {
 	}
 	if !m.Region.IsNull() && !m.Region.IsUnknown() && !awsRegion.MatchString(m.Region.ValueString()) {
 		d.AddAttributeError(path.Root("region"), "Invalid AWS region", "region must be a valid AWS region identifier, such as eu-west-1.")
+	}
+	if !m.OnboardingRevision.IsNull() && !m.OnboardingRevision.IsUnknown() && !onboardingRevision.MatchString(m.OnboardingRevision.ValueString()) {
+		d.AddAttributeError(path.Root("onboarding_revision"), "Invalid onboarding revision", "onboarding_revision must be 1-128 letters, digits, '.', '_', ':' or '-'.")
 	}
 	d.Append(validateTimeouts(ctx, m.Timeouts)...)
 	return d

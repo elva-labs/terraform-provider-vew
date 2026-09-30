@@ -138,6 +138,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	}
 	var technologyAPI technologies.API
 	var projectAccountAPI projectaccounts.API
+	var projectAccountReads projectaccounts.ListAPI
 	var projectAccessAPI projectaccess.API
 	var projectSettingsAPI projectsettings.API
 	if config.ProjectAPIURL != "" {
@@ -164,7 +165,8 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 			return
 		}
 		technologyAPI = technologies.NewClient(technologyWriteTransport, technologyReadTransport)
-		projectAccountAPI = projectaccounts.NewClient(accountWriteTransport, accountReadTransport)
+		accountClient := projectaccounts.NewClient(accountWriteTransport, accountReadTransport)
+		projectAccountAPI, projectAccountReads = accountClient, accountClient
 		projectPair := func(scope string) (projectaccess.Pair, error) {
 			write, err := vew.NewTransportWithScopes(projectsConfig, "clients/projects/"+scope+".write")
 			if err != nil {
@@ -267,6 +269,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		ProjectAPIURL:            config.ProjectAPIURL,
 		Technologies:             technologyAPI,
 		ProjectAccounts:          projectAccountAPI,
+		ProjectAccountReads:      projectAccountReads,
 		ProjectAccess:            projectAccessAPI,
 		ProjectSettings:          projectSettingsAPI,
 		BaseImages:               baseimages.NewClient(baseImageWriteTransport, baseImageReadTransport),
@@ -409,6 +412,7 @@ func (p *vewProvider) DataSources(context.Context) []func() datasource.DataSourc
 		providerpipelines.NewPipelinesDataSource,
 		providerimages.NewImagesDataSource,
 		providerproducts.NewProductVersionsDataSource,
+		providerprojectaccounts.NewProjectAccountsDataSource,
 	}
 }
 
