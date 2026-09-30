@@ -27,6 +27,8 @@ type Data struct {
 	ProjectAccess            projectaccess.API
 	PublishingAPIURL         string
 	Products                 products.API
+	Promotions               products.PromotionAPI
+	ProductVersionReads      products.VersionReadAPI
 	Pipelines                pipelines.API
 	PipelineReads            pipelines.ReadAPI
 	Recipes                  recipes.RecipeAPI

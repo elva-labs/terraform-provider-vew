@@ -37,7 +37,8 @@ and the scopes required by each operation. Technologies need
 `clients/projects/technology.write`; project account assignments need
 `clients/projects/account.read` and `clients/projects/account.write`;
 products need `clients/publishing/product.read` and
-`clients/publishing/product.write`.
+`clients/publishing/product.write`; product version promotions need
+`clients/publishing/version.read` and `clients/publishing/version.promote`.
 Projects need `clients/projects/program.read|write`; direct users need
 `assignment.read|write`; Entra groups need `group_assignment.read|write`;
 service clients need `client_assignment.read|write`, all beneath
