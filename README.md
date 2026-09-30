@@ -73,18 +73,11 @@ Registry pages in `docs/` are generated from the live provider schema and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
 The GitHub Actions workflow runs this check and the Go test suite on pushes to
-`main`. For a pull request from this repository into `main`, a teammate with
-label permission other than the PR author signals approval by adding the
-`runner-approved` label to start both jobs. After a new commit, remove and
-reapply the label to approve another run. The PR cannot change this approval
-gate because the label event uses the workflow from `main`. It uses Terraform
-1.16.3 and `tfplugindocs`
-v0.25.0. These jobs use the shared ARM Fargate Spot runner. Pull requests from
-forks do not run on that runner because it has access to the AWS environment.
-Runner compute is billed to the AWS account hosting the shared runners stack.
-Live acceptance tests remain separately gated. The historical
-design notes live in `design/superpowers/` so `docs/` contains only Registry
-pages.
+`main` and pull requests targeting `main`, including forks. It uses Terraform
+1.16.3 and `tfplugindocs` v0.25.0. These jobs run on GitHub-hosted ARM runners
+without access to VEW credentials. Live acceptance tests remain separately
+gated. The historical design notes live in `design/superpowers/` so `docs/`
+contains only Registry pages.
 
 The equivalent commands are:
 
@@ -625,16 +618,45 @@ Builds may incur AWS charges.
 See the [action guide](docs/actions/image_build.md) for invocation, timeout,
 and retry behavior and the [runnable example](examples/actions/image-build/README.md).
 
-## Release from main
+## Stable and beta releases
 
 The [release workflow](.github/workflows/release.yml) builds signed Terraform
-Registry assets from the current `main` commit. After the checks on `main`
-pass, start **Release provider** in GitHub Actions on the `main` branch and
-enter a new SemVer tag such as `v0.1.0`. The workflow reruns tests and the docs
-check on the same ARM Fargate Spot runner, creates the tag on that commit, then
-uses GoReleaser to publish a GitHub Release. It will not release a commit from
-another branch. Do not move or
+Registry assets from the current `main` or `beta` commit. Start **Release
+provider** in GitHub Actions, select the branch in **Use workflow from**, and
+enter a new version tag:
+
+- On `main`, use a stable SemVer tag such as `v0.2.0`.
+- On `beta`, use a tag of the form `v0.2.0-beta.1`. Increment the beta number
+  for each subsequent release, such as `v0.2.0-beta.2`.
+
+The workflow rejects versions that do not match the branch and commits that
+are no longer the branch tip. It reruns tests and the docs check on a
+GitHub-hosted ARM runner, creates the tag on that commit, then uses GoReleaser
+to publish a GitHub Release. Beta releases are marked as prereleases and do
+not replace GitHub's latest stable release. To graduate a beta, merge `beta`
+into `main` and publish the stable version, such as `v0.2.0`. Do not move or
 replace a published version tag; release a new version for corrections.
+
+Create `beta` from a commit containing this workflow before releasing from
+that branch. Both release types publish under the same `elva-labs/vew`
+provider address. Testers must opt in with an exact prerelease version:
+
+```hcl
+terraform {
+  required_providers {
+    vew = {
+      source  = "elva-labs/vew"
+      version = "= 0.2.0-beta.1"
+    }
+  }
+}
+```
+
+Run `terraform init -upgrade` after changing the version constraint to update
+the dependency lock file. Terraform excludes prereleases from ordinary
+version ranges. The Registry website can still show a higher-version beta
+as latest, even though Terraform requires an exact constraint to select it.
+See the [Terraform Registry prerelease FAQ](https://developer.hashicorp.com/terraform/registry/faq#can-i-prevent-prereleases-from-being-the-latest-version).
 
 Before the first run, configure repository Actions secrets `GPG_PRIVATE_KEY`
 and `PASSPHRASE` for an RSA or DSA release-signing key. Keep the private key
