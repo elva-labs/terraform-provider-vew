@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	providerbaseimages "github.com/elva-labs/terraform-provider-vew/internal/provider/baseimages"
 	providercomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/components"
 	providerimageactions "github.com/elva-labs/terraform-provider-vew/internal/provider/imageactions"
 	providerimages "github.com/elva-labs/terraform-provider-vew/internal/provider/images"
@@ -13,17 +14,20 @@ import (
 	providerproducts "github.com/elva-labs/terraform-provider-vew/internal/provider/products"
 	providerprojectaccess "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccess"
 	providerprojectaccounts "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccounts"
+	providerprojectsettings "github.com/elva-labs/terraform-provider-vew/internal/provider/projectsettings"
 	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
 	providerreleaseactions "github.com/elva-labs/terraform-provider-vew/internal/provider/releaseactions"
 	providertechnologies "github.com/elva-labs/terraform-provider-vew/internal/provider/technologies"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/baseimages"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccounts"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectsettings"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
 	"github.com/hashicorp/terraform-plugin-framework/action"
@@ -135,6 +139,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	var technologyAPI technologies.API
 	var projectAccountAPI projectaccounts.API
 	var projectAccessAPI projectaccess.API
+	var projectSettingsAPI projectsettings.API
 	if config.ProjectAPIURL != "" {
 		projectsConfig := config
 		projectsConfig.APIURL = config.ProjectAPIURL
@@ -201,6 +206,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 			}
 		}
 		projectAccessAPI = projectaccess.NewClient(programPair, userPair, groupPair, clientPair)
+		projectSettingsAPI = projectsettings.NewClient(programPair.Write, programPair.Read)
 	}
 	var productAPI products.API
 	var versionAPI *products.VersionClient
@@ -230,6 +236,16 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		productAPI = products.NewClient(productWriteTransport, productReadTransport)
 		versionAPI = products.NewVersionClient(versionPromoteTransport, versionReadTransport)
 	}
+	baseImageWriteTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/base_image.write")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW base image client", "The VEW base image write client could not be configured.")
+		return
+	}
+	baseImageReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/base_image.read")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW base image client", "The VEW base image read client could not be configured.")
+		return
+	}
 	api := components.NewClient(transport)
 	componentReadAPI := components.NewClient(componentReadTransport)
 	recipeAPI := recipes.NewClient(recipeTransport)
@@ -252,6 +268,8 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		Technologies:             technologyAPI,
 		ProjectAccounts:          projectAccountAPI,
 		ProjectAccess:            projectAccessAPI,
+		ProjectSettings:          projectSettingsAPI,
+		BaseImages:               baseimages.NewClient(baseImageWriteTransport, baseImageReadTransport),
 		PublishingAPIURL:         config.PublishingAPIURL,
 		Products:                 productAPI,
 		Pipelines:                pipelineAPI,
@@ -372,6 +390,9 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providerprojectaccess.NewUserResource,
 		providerprojectaccess.NewGroupResource,
 		providerprojectaccess.NewClientResource,
+		providerprojectsettings.NewManagementResource,
+		providerprojectsettings.NewWorkbenchLifecycleResource,
+		providerbaseimages.NewReleaseResource,
 		providerproducts.NewProductResource,
 		providerproducts.NewProductVersionPromotionResource,
 	}

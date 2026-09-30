@@ -12,8 +12,9 @@ versions, recipes, recipe versions, image pipelines, project technologies, and
 AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
 `vew_recipe_version`, `vew_pipeline`, `vew_technology`,
-`vew_project_account`, `vew_product`, and `vew_product_version_promotion`
-resources.
+`vew_project_account`, `vew_product`, `vew_product_version_promotion`,
+`vew_project_management`, `vew_project_workbench_lifecycle`, and
+`vew_base_image_release` resources.
 
 It also provides read-only data sources for components, versions, recipes,
 pipelines, and images, plus an explicitly invoked image-build action.
@@ -616,6 +617,25 @@ Import IDs are `project_id/product_id/version_id/stage`. Destroying it only
 removes it from Terraform; VEW does not undo a release. The
 `vew_product_versions` data source lists a product's versions and their stages
 with `clients/publishing/version.read`.
+
+## Project settings and base images
+
+`vew_project_management` marks a project as managed by an external tool
+(typically this configuration): VEW then refuses configuration changes made in
+the portal and points users to `source`. `vew_project_workbench_lifecycle` sets
+the project's workbench stop policy (always on, idle, nightly and weekend
+stops) and whether owners may change the nightly stop or their idle timeout
+within bounds. Both use `projects_api_url` with
+`clients/projects/program.read` and `clients/projects/program.write`, are
+singletons per project, and import by project ID; destroy returns the project
+to the portal or to the deployment's defaults.
+
+`vew_base_image_release` points a base-image channel (for example `test` or
+`prod` per architecture) at a build of the releasing project, which every
+project's recipes can build on. It needs `clients/packaging/base_image.read`
+and `clients/packaging/base_image.write`; VEW decides which project may
+release and which channel gates another. Import IDs are
+`architecture/channel`. Destroy only forgets the release.
 
 ## Data sources
 

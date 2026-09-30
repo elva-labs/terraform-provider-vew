@@ -1,0 +1,35 @@
+---
+page_title: "vew_project_workbench_lifecycle Resource - VEW"
+subcategory: ""
+description: |-
+  Sets a VEW project's workbench stop policy and what its users may change.
+---
+
+# vew_project_workbench_lifecycle (Resource)
+
+Sets when a project's workbenches stop and what their owners may change on
+their own workbenches. Unset `idle_stop_minutes`, `nightly_stop` and
+`weekend_stop` fall back to the deployment's defaults. `always_on` bypasses
+every stop. The `allow_user_*` switches decide whether owners may turn off
+the nightly stop or set their own idle timeout, within
+`user_idle_timeout_min_minutes` and `user_idle_timeout_max_minutes`
+(10-1440 minutes). VEW enforces these bounds on the server; it never starts a
+workbench by itself.
+
+Set `projects_api_url` and grant the provider client
+`clients/projects/program.read` and `clients/projects/program.write`, plus an
+active assignment to the project. The policy is a singleton per project:
+create and update replace the whole policy, and destroy returns the project
+to the deployment's defaults.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+```shell
+terraform import vew_project_workbench_lifecycle.example project-example
+```
