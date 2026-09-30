@@ -2,7 +2,7 @@ GO ?= go
 
 export TF_ACC VEW_ACC_COMPONENT_VERSION VEW_ACC_RECIPE VEW_ACC_PIPELINE VEW_ACC_RELEASE_ACTIONS VEW_ACC_IMAGE_BUILD VEW_ACC_TECHNOLOGY VEW_ACC_PROJECT_ACCOUNT VEW_CONFIRM_AWS_ACCOUNT_SIDE_EFFECTS VEW_ACC_DATA_SOURCES VEW_API_URL VEW_PROJECTS_API_URL VEW_TOKEN_URL VEW_CLIENT_ID VEW_CLIENT_SECRET VEW_TEST_PROJECT_ID VEW_TEST_COMPONENT_ID VEW_TEST_COMPONENT_VERSION_ID VEW_TEST_RECIPE_ID VEW_TEST_RECIPE_VERSION_ID VEW_TEST_PIPELINE_ID VEW_TEST_IMAGE_ID VEW_TEST_IMAGE_IDEMPOTENCY_KEY VEW_TEST_AWS_ACCOUNT_ID VEW_TEST_TECHNOLOGY_ID VEW_TEST_ACCOUNT_TYPE VEW_TEST_ACCOUNT_STAGE VEW_TEST_ACCOUNT_REGION
 
-.PHONY: fmt test build docs docs-check testacc testacc-component-version testacc-recipe testacc-pipeline testacc-release-actions testacc-image-build testacc-technology testacc-project-account testacc-data-sources
+.PHONY: fmt vet test build docs docs-check examples-check testacc testacc-component-version testacc-recipe testacc-pipeline testacc-release-actions testacc-image-build testacc-technology testacc-project-account testacc-data-sources
 
 fmt:
 	$(GO) fmt ./...
@@ -18,6 +18,12 @@ docs:
 
 docs-check:
 	python3 scripts/registry_docs.py check
+
+vet:
+	$(GO) vet ./...
+
+examples-check:
+	python3 scripts/validate_examples.py
 
 testacc: export TF_ACC ?= 1
 testacc:

@@ -9,6 +9,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	vewrecipes "github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -608,5 +609,37 @@ func TestRecipeVersionConversion(t *testing.T) {
 	input, diagnostics := recipeVersionInput(context.Background(), model)
 	if diagnostics.HasError() || input.VolumeSize != "20" || len(input.Components) != 2 || input.Components[0].ComponentID != "second" || input.Components[1].ComponentID != "first" || strings.Join(input.Integrations, ",") != "a,z" {
 		t.Fatalf("conversion input/diagnostics = %#v/%v", input, diagnostics)
+	}
+}
+
+func TestRecipeVersionReleaseCandidateNameUnknownAfterUpdate(t *testing.T) {
+	state := validRecipeVersionModel(t)
+	state.Name = types.StringValue("1.0.0-rc.1")
+	for _, tc := range []struct {
+		name        string
+		description string
+		wantUnknown bool
+	}{
+		{"changed configuration", "new description", true},
+		{"unchanged configuration", "description", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := state
+			plan.Description = types.StringValue(tc.description)
+			response := recipePlanResponse(t, state, plan)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("modify plan diagnostics = %v", response.Diagnostics)
+			}
+			var name types.String
+			if diagnostics := response.Plan.GetAttribute(context.Background(), path.Root("name"), &name); diagnostics.HasError() {
+				t.Fatalf("read planned name diagnostics = %v", diagnostics)
+			}
+			if name.IsUnknown() != tc.wantUnknown {
+				t.Fatalf("planned name = %v, want unknown = %v", name, tc.wantUnknown)
+			}
+			if replacementIncludes(response, "description") {
+				t.Fatal("a release candidate description change must stay in place")
+			}
+		})
 	}
 }

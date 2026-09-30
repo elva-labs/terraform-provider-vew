@@ -62,6 +62,11 @@ make test
 make build
 ```
 
+Pull requests into `main` and `beta` also run `make vet`, a `gofmt` check,
+`make docs-check`, and `make examples-check`, which validates every example
+under `examples/` against the provider built from the checkout (Terraform on
+`PATH`).
+
 Projects and access can be managed with `vew_project`,
 `vew_project_assignment`, `vew_project_group_assignment`, and
 `vew_project_client_assignment`. See the [project access guide](docs/guides/project-access.md)
