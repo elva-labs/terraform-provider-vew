@@ -7,6 +7,9 @@ type CreateProductInput struct {
 	Type         string `json:"productType"`
 	Description  string `json:"productDescription"`
 	TechnologyID string `json:"technologyId"`
+	// Scope is PROGRAM (the default, omitted) or PLATFORM: a product the releasing
+	// project builds once and VEW distributes to every project's accounts.
+	Scope string `json:"scope,omitempty"`
 }
 
 // UpdateProductInput is the mutable configuration of a product.
@@ -27,6 +30,7 @@ type Product struct {
 	Status               string   `json:"status"`
 	RecommendedVersionID string   `json:"recommendedVersionId"`
 	AvailableStages      []string `json:"availableStages"`
+	Scope                string   `json:"scope"`
 	CreatedAt            string   `json:"createDate"`
 	UpdatedAt            string   `json:"lastUpdateDate"`
 }

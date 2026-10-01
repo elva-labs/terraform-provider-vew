@@ -70,6 +70,25 @@ func TestCreateProductSendsKeyScopeAndBody(t *testing.T) {
 	}
 }
 
+func TestCreateProductSendsThePlatformScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if productToken(w, r) {
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if want := `{"productName":"Default","productType":"WORKBENCH","productDescription":"","technologyId":"tech-1","scope":"PLATFORM"}`; string(body) != want {
+			t.Errorf("body = %s", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"productId":"prod-2"}`)
+	}))
+	defer server.Close()
+	input := CreateProductInput{Name: "Default", Type: "WORKBENCH", TechnologyID: "tech-1", Scope: "PLATFORM"}
+	if id, err := newTestClient(t, server.URL).CreateProduct(context.Background(), "platform", input, testKey); err != nil || id != "prod-2" {
+		t.Fatalf("CreateProduct = %q, %v", id, err)
+	}
+}
+
 func TestCreateProductRejectsInvalidInput(t *testing.T) {
 	client := NewClient(nil, nil)
 	if _, err := client.CreateProduct(context.Background(), "project", CreateProductInput{Name: "Workbench"}, "not-a-uuid"); err == nil {
