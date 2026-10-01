@@ -5,6 +5,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/baseimages"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/mandatorycomponents"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
@@ -30,6 +31,7 @@ type Data struct {
 	ProjectAccess            projectaccess.API
 	ProjectSettings          projectsettings.API
 	BaseImages               baseimages.API
+	MandatoryComponents      mandatorycomponents.API
 	PublishingAPIURL         string
 	Products                 products.API
 	Promotions               products.PromotionAPI
