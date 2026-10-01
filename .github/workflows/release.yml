@@ -25,10 +25,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: 1.16.3
           terraform_wrapper: false
@@ -78,12 +79,15 @@ jobs:
           args: check
       - name: Create version tag on main
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           if ! git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
             git tag "$RELEASE_VERSION"
-            git push origin "$RELEASE_VERSION"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_VERSION" \
+              -f sha="$GITHUB_SHA"
           fi
       - name: Build, sign, and publish GitHub release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
