@@ -10,6 +10,7 @@ import (
 	providercomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/components"
 	providerimageactions "github.com/elva-labs/terraform-provider-vew/internal/provider/imageactions"
 	providerimages "github.com/elva-labs/terraform-provider-vew/internal/provider/images"
+	providermandatorycomponents "github.com/elva-labs/terraform-provider-vew/internal/provider/mandatorycomponents"
 	providerpipelines "github.com/elva-labs/terraform-provider-vew/internal/provider/pipelines"
 	providerproducts "github.com/elva-labs/terraform-provider-vew/internal/provider/products"
 	providerprojectaccess "github.com/elva-labs/terraform-provider-vew/internal/provider/projectaccess"
@@ -23,6 +24,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/baseimages"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/images"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/mandatorycomponents"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/pipelines"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/products"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
@@ -248,6 +250,16 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		response.Diagnostics.AddError("Unable to configure VEW base image client", "The VEW base image read client could not be configured.")
 		return
 	}
+	mandatoryComponentsWriteTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/mandatory_components_list.write")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW mandatory components client", "The VEW mandatory components list write client could not be configured.")
+		return
+	}
+	mandatoryComponentsReadTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/mandatory_components_list.read")
+	if err != nil {
+		response.Diagnostics.AddError("Unable to configure VEW mandatory components client", "The VEW mandatory components list read client could not be configured.")
+		return
+	}
 	api := components.NewClient(transport)
 	componentReadAPI := components.NewClient(componentReadTransport)
 	recipeAPI := recipes.NewClient(recipeTransport)
@@ -273,6 +285,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		ProjectAccess:            projectAccessAPI,
 		ProjectSettings:          projectSettingsAPI,
 		BaseImages:               baseimages.NewClient(baseImageWriteTransport, baseImageReadTransport),
+		MandatoryComponents:      mandatorycomponents.NewClient(mandatoryComponentsWriteTransport, mandatoryComponentsReadTransport),
 		PublishingAPIURL:         config.PublishingAPIURL,
 		Products:                 productAPI,
 		Pipelines:                pipelineAPI,
@@ -396,6 +409,7 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providerprojectsettings.NewManagementResource,
 		providerprojectsettings.NewWorkbenchLifecycleResource,
 		providerbaseimages.NewReleaseResource,
+		providermandatorycomponents.NewListResource,
 		providerproducts.NewProductResource,
 		providerproducts.NewProductVersionPromotionResource,
 	}

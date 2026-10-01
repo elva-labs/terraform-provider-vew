@@ -1,0 +1,39 @@
+---
+page_title: "vew_mandatory_components_list Resource - VEW"
+subcategory: ""
+description: |-
+  Manages the mandatory components list of one platform, OS version and architecture.
+---
+
+# vew_mandatory_components_list (Resource)
+
+A mandatory components list names released component versions that VEW adds
+to every recipe version created on its platform, OS version and architecture:
+`prepended_components` run before the recipe's own components and
+`appended_components` after them, each in list order. A recipe may not name a
+mandatory component itself. Use it for what every project's images must carry
+- an agent, a compliance marker, a hardening step - without baking it into
+the base image.
+
+The list applies when a recipe version is created: existing recipe versions
+keep the components they got, and projects adopt a changed list with their
+next recipe version. Destroying the resource removes the list; recipe versions
+created afterwards no longer receive its components.
+
+The lists are global, so a change is made for a project (`project_id`) the
+client is assigned to and, when the deployment has a releasing project for
+base images, must come from that project. Grant the provider client
+`clients/packaging/mandatory_components_list.read` and
+`clients/packaging/mandatory_components_list.write`.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+```shell
+terraform import vew_mandatory_components_list.ubuntu_amd64 "Linux/Ubuntu 24/amd64"
+```
