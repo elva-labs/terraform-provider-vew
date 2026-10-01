@@ -18,14 +18,18 @@ type ProjectInput struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`
 	IsActive    bool    `json:"isActive"`
+	// Omitted keeps the project's current value; a new project allows remote support.
+	RemoteSupportEnabled *bool `json:"remoteSupportEnabled,omitempty"`
 }
 type Project struct {
 	ID          string  `json:"projectId"`
 	Name        string  `json:"projectName"`
 	Description *string `json:"projectDescription"`
 	IsActive    bool    `json:"isActive"`
-	CreatedAt   string  `json:"createDate"`
-	UpdatedAt   string  `json:"lastUpdateDate"`
+	// Whether the project's support staff may ask to join its users' desktops; nil from older APIs.
+	RemoteSupportEnabled *bool  `json:"remoteSupportEnabled"`
+	CreatedAt            string `json:"createDate"`
+	UpdatedAt            string `json:"lastUpdateDate"`
 }
 type UserInput struct {
 	Roles       []string `json:"roles"`

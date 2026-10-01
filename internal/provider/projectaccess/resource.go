@@ -39,29 +39,31 @@ type accessResource struct {
 	client api.API
 }
 type model struct {
-	ID          types.String `tfsdk:"id"`
-	ProjectID   types.String `tfsdk:"project_id"`
-	UserID      types.String `tfsdk:"user_id"`
-	GroupID     types.String `tfsdk:"group_id"`
-	ClientID    types.String `tfsdk:"client_id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	IsActive    types.Bool   `tfsdk:"is_active"`
-	CreatedAt   types.String `tfsdk:"created_at"`
-	UpdatedAt   types.String `tfsdk:"updated_at"`
-	Roles       types.Set    `tfsdk:"roles"`
-	Email       types.String `tfsdk:"user_email"`
-	DisplayName types.String `tfsdk:"user_display_name"`
-	Status      types.String `tfsdk:"status"`
+	ID            types.String `tfsdk:"id"`
+	ProjectID     types.String `tfsdk:"project_id"`
+	UserID        types.String `tfsdk:"user_id"`
+	GroupID       types.String `tfsdk:"group_id"`
+	ClientID      types.String `tfsdk:"client_id"`
+	Name          types.String `tfsdk:"name"`
+	Description   types.String `tfsdk:"description"`
+	IsActive      types.Bool   `tfsdk:"is_active"`
+	RemoteSupport types.Bool   `tfsdk:"remote_support_enabled"`
+	CreatedAt     types.String `tfsdk:"created_at"`
+	UpdatedAt     types.String `tfsdk:"updated_at"`
+	Roles         types.Set    `tfsdk:"roles"`
+	Email         types.String `tfsdk:"user_email"`
+	DisplayName   types.String `tfsdk:"user_display_name"`
+	Status        types.String `tfsdk:"status"`
 }
 
 type projectModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	IsActive    types.Bool   `tfsdk:"is_active"`
-	CreatedAt   types.String `tfsdk:"created_at"`
-	UpdatedAt   types.String `tfsdk:"updated_at"`
+	ID            types.String `tfsdk:"id"`
+	Name          types.String `tfsdk:"name"`
+	Description   types.String `tfsdk:"description"`
+	IsActive      types.Bool   `tfsdk:"is_active"`
+	RemoteSupport types.Bool   `tfsdk:"remote_support_enabled"`
+	CreatedAt     types.String `tfsdk:"created_at"`
+	UpdatedAt     types.String `tfsdk:"updated_at"`
 }
 type userModel struct {
 	ID          types.String `tfsdk:"id"`
@@ -98,6 +100,7 @@ func (r *accessResource) get(ctx context.Context, source modelReader) (model, di
 		m.Name = v.Name
 		m.Description = v.Description
 		m.IsActive = v.IsActive
+		m.RemoteSupport = v.RemoteSupport
 		m.CreatedAt = v.CreatedAt
 		m.UpdatedAt = v.UpdatedAt
 	case "assignment":
@@ -129,7 +132,7 @@ func (r *accessResource) get(ctx context.Context, source modelReader) (model, di
 func (r *accessResource) set(ctx context.Context, state *tfsdk.State, m *model) diag.Diagnostics {
 	switch r.kind {
 	case "project":
-		return state.Set(ctx, &projectModel{m.ID, m.Name, m.Description, m.IsActive, m.CreatedAt, m.UpdatedAt})
+		return state.Set(ctx, &projectModel{m.ID, m.Name, m.Description, m.IsActive, m.RemoteSupport, m.CreatedAt, m.UpdatedAt})
 	case "assignment":
 		return state.Set(ctx, &userModel{m.ID, m.ProjectID, m.UserID, m.Roles, m.Email, m.DisplayName})
 	case "group_assignment":
@@ -156,6 +159,12 @@ func (r *accessResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 		attrs["name"] = schema.StringAttribute{Required: true}
 		attrs["description"] = schema.StringAttribute{Optional: true, Computed: true}
 		attrs["is_active"] = schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true)}
+		// Unset keeps the project's value (a new project allows remote support).
+		attrs["remote_support_enabled"] = schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Description: "Whether the project's support staff may ask to join its users' desktops (each request is accepted by the user). Unset keeps the current value; new projects allow it.",
+		}
 		attrs["created_at"] = schema.StringAttribute{Computed: true}
 		attrs["updated_at"] = schema.StringAttribute{Computed: true}
 	} else {
@@ -274,6 +283,13 @@ func uuid() (string, error) {
 	raw := hex.EncodeToString(b[:])
 	return raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:], nil
 }
+func boolPtr(v types.Bool) *bool {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	b := v.ValueBool()
+	return &b
+}
 func strPtr(v types.String) *string {
 	if !known(v) {
 		return nil
@@ -282,7 +298,12 @@ func strPtr(v types.String) *string {
 	return &s
 }
 func (r *accessResource) projectInput(m model) api.ProjectInput {
-	return api.ProjectInput{Name: m.Name.ValueString(), Description: strPtr(m.Description), IsActive: m.IsActive.ValueBool()}
+	return api.ProjectInput{
+		Name:                 m.Name.ValueString(),
+		Description:          strPtr(m.Description),
+		IsActive:             m.IsActive.ValueBool(),
+		RemoteSupportEnabled: boolPtr(m.RemoteSupport),
+	}
 }
 func roles(ctx context.Context, v types.Set) ([]string, diag.Diagnostics) {
 	var out []string
@@ -434,6 +455,11 @@ func (r *accessResource) refresh(ctx context.Context, m *model, state *tfsdk.Sta
 			m.Description = types.StringValue(*v.Description)
 		}
 		m.IsActive = types.BoolValue(v.IsActive)
+		if v.RemoteSupportEnabled == nil {
+			m.RemoteSupport = types.BoolNull()
+		} else {
+			m.RemoteSupport = types.BoolValue(*v.RemoteSupportEnabled)
+		}
 		m.CreatedAt = types.StringValue(v.CreatedAt)
 		m.UpdatedAt = types.StringValue(v.UpdatedAt)
 	case "assignment":
