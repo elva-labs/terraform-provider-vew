@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-const clientResponseBodyLimit = 2 << 20
+const (
+	clientResponseBodyLimit = 2 << 20
+	maxServerRetryDelay     = time.Minute
+)
 
 // Config configures the VEW API and OAuth clients. ProjectAPIURL is optional
 // and is used only by Projects clients; APIURL continues to target Packaging.
@@ -281,16 +284,23 @@ func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 		if int64(seconds) > maxDurationSeconds {
 			return 0, false
 		}
-		return time.Duration(seconds) * time.Second, true
+		return capRetryDelay(time.Duration(seconds) * time.Second), true
 	}
 	if when, err := http.ParseTime(value); err == nil {
 		delay := when.Sub(now)
 		if delay < 0 {
 			delay = 0
 		}
-		return delay, true
+		return capRetryDelay(delay), true
 	}
 	return 0, false
+}
+
+func capRetryDelay(delay time.Duration) time.Duration {
+	if delay > maxServerRetryDelay {
+		return maxServerRetryDelay
+	}
+	return delay
 }
 func sleepContext(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
