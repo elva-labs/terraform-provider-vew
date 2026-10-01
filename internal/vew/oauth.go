@@ -51,13 +51,10 @@ func newOAuthTokenSource(tokenURL, clientID, clientSecret, scope string, httpCli
 	if strings.TrimSpace(scope) == "" {
 		return nil, errors.New("oauth scope must not be empty")
 	}
-	u, err := url.Parse(tokenURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("oauth token URL must be an absolute HTTP or HTTPS URL")
+	if _, err := parseHTTPURL(tokenURL); err != nil {
+		return nil, errors.New("oauth token URL must be an absolute HTTPS URL or a loopback HTTP URL")
 	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
-	}
+	httpClient = secureHTTPClient(httpClient)
 	return &OAuthTokenSource{tokenURL: tokenURL, clientID: clientID, clientSecret: clientSecret, scope: scope, httpClient: httpClient, now: time.Now}, nil
 }
 

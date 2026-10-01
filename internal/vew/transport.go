@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -51,9 +52,9 @@ func NewTransportWithScopes(config Config, scopes ...string) (*Transport, error)
 func newTransport(config Config, scope string) (*Transport, error) {
 	baseURL, err := parseHTTPURL(config.APIURL)
 	if err != nil {
-		return nil, errors.New("VEW API URL must be an absolute HTTP or HTTPS URL")
+		return nil, errors.New("VEW API URL must be an absolute HTTPS URL or a loopback HTTP URL")
 	}
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := secureHTTPClient(nil)
 	tokens, err := newOAuthTokenSource(config.TokenURL, config.ClientID, config.ClientSecret, scope, httpClient)
 	if err != nil {
 		return nil, err
@@ -63,10 +64,45 @@ func newTransport(config Config, scope string) (*Transport, error) {
 
 func parseHTTPURL(rawURL string) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && (u.Scheme != "http" || !isLoopbackHost(u.Hostname()))) {
 		return nil, errors.New("invalid URL")
 	}
 	return u, nil
+}
+
+// ValidEndpointURL reports whether rawURL is an absolute HTTPS endpoint or an
+// HTTP endpoint hosted on the local loopback interface for development use.
+func ValidEndpointURL(rawURL string) bool {
+	_, err := parseHTTPURL(rawURL)
+	return err == nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func secureHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	clone := *client
+	clone.CheckRedirect = sameOriginRedirect
+	return &clone
+}
+
+func sameOriginRedirect(request *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	origin := via[0].URL
+	if request.URL.Scheme != origin.Scheme || !strings.EqualFold(request.URL.Host, origin.Host) {
+		return errors.New("redirect changed endpoint origin")
+	}
+	return nil
 }
 
 // Do sends a VEW request to a path made solely from separately escaped segments.
