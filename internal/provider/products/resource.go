@@ -28,9 +28,12 @@ import (
 )
 
 const (
+	scopeProgram         = "PROGRAM"
 	productCreateKey     = "product_create_idempotency_key"
 	defaultDeleteTimeout = 30 * time.Minute
 )
+
+var productScopes = []string{scopeProgram, "PLATFORM"}
 
 var (
 	safeProductCorrelation = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
@@ -64,6 +67,7 @@ type productModel struct {
 	Status               types.String `tfsdk:"status"`
 	RecommendedVersionID types.String `tfsdk:"recommended_version_id"`
 	AvailableStages      types.List   `tfsdk:"available_stages"`
+	Scope                types.String `tfsdk:"scope"`
 	CreatedAt            types.String `tfsdk:"created_at"`
 	UpdatedAt            types.String `tfsdk:"updated_at"`
 	Timeouts             types.Object `tfsdk:"timeouts"`
@@ -103,6 +107,13 @@ func (r *productResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"status":                 schema.StringAttribute{Computed: true},
 			"recommended_version_id": schema.StringAttribute{Computed: true},
 			"available_stages":       schema.ListAttribute{Computed: true, ElementType: types.StringType},
+			// PLATFORM: released once by the deployment's releasing project and distributed
+			// to every project's accounts (VEW's platform products). Fixed for the product's
+			// lifetime.
+			"scope": schema.StringAttribute{
+				Optional: true, Computed: true, Default: stringdefault.StaticString(scopeProgram),
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
 			"created_at": schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			}},
@@ -144,6 +155,9 @@ func (r *productResource) ValidateConfig(ctx context.Context, request resource.V
 	}
 	if known(config.Description) && !productDescriptionPattern.MatchString(config.Description.ValueString()) {
 		response.Diagnostics.AddAttributeError(path.Root("description"), "Invalid product description", "description must be at most 100 letters, digits, spaces, hyphens, or underscores.")
+	}
+	if known(config.Scope) && !contains(productScopes, config.Scope.ValueString()) {
+		response.Diagnostics.AddAttributeError(path.Root("scope"), "Invalid product scope", "scope must be one of "+strings.Join(productScopes, ", ")+".")
 	}
 	if known(config.Type) && !contains(productTypes, config.Type.ValueString()) {
 		response.Diagnostics.AddAttributeError(path.Root("type"), "Invalid product type", "type must be one of "+strings.Join(productTypes, ", ")+".")
@@ -206,6 +220,10 @@ func (r *productResource) Create(ctx context.Context, request resource.CreateReq
 	input := vewproducts.CreateProductInput{
 		Name: model.Name.ValueString(), Type: model.Type.ValueString(),
 		Description: model.Description.ValueString(), TechnologyID: model.TechnologyID.ValueString(),
+	}
+	// Omitted for program products so VEW versions without platform products accept the request.
+	if scope := model.Scope.ValueString(); scope != "" && scope != scopeProgram {
+		input.Scope = scope
 	}
 	id, err := r.client.CreateProduct(ctx, model.ProjectID.ValueString(), input, key)
 	if err != nil && ambiguousCreate(err) {
@@ -350,6 +368,10 @@ func setState(ctx context.Context, model *productModel, remote vewproducts.Produ
 	model.TechnologyID = types.StringValue(remote.TechnologyID)
 	model.TechnologyName = types.StringValue(remote.TechnologyName)
 	model.Status = types.StringValue(remote.Status)
+	model.Scope = types.StringValue(scopeProgram)
+	if remote.Scope != "" {
+		model.Scope = types.StringValue(remote.Scope)
+	}
 	model.RecommendedVersionID = types.StringNull()
 	if remote.RecommendedVersionID != "" {
 		model.RecommendedVersionID = types.StringValue(remote.RecommendedVersionID)

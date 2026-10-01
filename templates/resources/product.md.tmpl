@@ -20,6 +20,13 @@ technology of the project. Changes to `project_id`, `type`, and
 update the product in place. Names allow 1 to 50 and descriptions up to 100
 letters, digits, spaces, hyphens, and underscores.
 
+`scope` is `PROGRAM` (the default: the project's own product) or `PLATFORM`.
+A platform product is created by the deployment's releasing project, built and
+promoted once there, and VEW distributes each version to every project's
+accounts at the stage it reaches; every project lists it. Only the releasing
+project may create one (VEW answers `409 RELEASING_PROJECT_ONLY` otherwise),
+and a change of `scope` requires replacement.
+
 Deleting the resource archives the product, which unpublishes every version of
 it from every account. Terraform waits until archiving finishes (30 minutes by
 default, configurable with `timeouts.delete`). VEW keeps archived products;
