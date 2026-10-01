@@ -121,12 +121,15 @@ func TestClientPathsAndScopeIsolation(t *testing.T) {
 
 func TestProjectInputOmitsUnsetDescription(t *testing.T) {
 	description := "text"
+	off := false
 	for _, tc := range []struct {
 		input ProjectInput
 		want  string
 	}{
 		{ProjectInput{Name: "name", IsActive: true}, `{"name":"name","isActive":true}`},
 		{ProjectInput{Name: "name", Description: &description, IsActive: true}, `{"name":"name","description":"text","isActive":true}`},
+		// remoteSupportEnabled is sent only when set; unset keeps the project's value.
+		{ProjectInput{Name: "name", IsActive: true, RemoteSupportEnabled: &off}, `{"name":"name","isActive":true,"remoteSupportEnabled":false}`},
 	} {
 		got, err := json.Marshal(tc.input)
 		if err != nil {
