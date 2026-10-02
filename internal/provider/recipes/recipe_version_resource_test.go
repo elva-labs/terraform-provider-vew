@@ -463,10 +463,14 @@ func TestRecipeVersionPlan(t *testing.T) {
 		{"integration order", "RELEASED", func(m *recipeVersionModel) {
 			m.Integrations = types.SetValueMust(types.StringType, []attr.Value{types.StringValue("a"), types.StringValue("z")})
 		}, ""},
+		{"released channel", "RELEASED", func(m *recipeVersionModel) { m.BaseImageChannel = types.StringValue("test") }, "base_image_channel"},
+		{"draft channel", "VALIDATED", func(m *recipeVersionModel) { m.BaseImageChannel = types.StringValue("test") }, ""},
+		{"channel left to VEW", "RELEASED", func(m *recipeVersionModel) { m.BaseImageChannel = types.StringUnknown() }, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state := validRecipeVersionModel(t)
 			state.Status = types.StringValue(tc.status)
+			state.BaseImageChannel = types.StringValue("prod")
 			plan := state
 			tc.edit(&plan)
 			response := recipePlanResponse(t, state, plan)
@@ -557,6 +561,8 @@ func TestRecipeVersionValidate(t *testing.T) {
 	}{
 		{"valid", func(*recipeVersionModel) {}, ""},
 		{"release type", func(m *recipeVersionModel) { m.ReleaseType = types.StringValue("HOTFIX") }, "release_type must be MAJOR"},
+		{"channel", func(m *recipeVersionModel) { m.BaseImageChannel = types.StringValue("beta") }, "base_image_channel must be prod or test"},
+		{"test channel", func(m *recipeVersionModel) { m.BaseImageChannel = types.StringValue("test") }, ""},
 		{"volume low", func(m *recipeVersionModel) { m.VolumeSize = types.Int64Value(7) }, "between 8 and 500"},
 		{"volume high", func(m *recipeVersionModel) { m.VolumeSize = types.Int64Value(501) }, "between 8 and 500"},
 		{"description", func(m *recipeVersionModel) { m.Description = types.StringValue(" ") }, "description must be non-empty"},
@@ -609,6 +615,27 @@ func TestRecipeVersionConversion(t *testing.T) {
 	input, diagnostics := recipeVersionInput(context.Background(), model)
 	if diagnostics.HasError() || input.VolumeSize != "20" || len(input.Components) != 2 || input.Components[0].ComponentID != "second" || input.Components[1].ComponentID != "first" || strings.Join(input.Integrations, ",") != "a,z" {
 		t.Fatalf("conversion input/diagnostics = %#v/%v", input, diagnostics)
+	}
+}
+
+func TestRecipeVersionBaseImageChannel(t *testing.T) {
+	model := validRecipeVersionModel(t)
+	if input, _ := recipeVersionInput(context.Background(), model); input.BaseImageChannel != "" {
+		t.Fatalf("an unset channel must be left to VEW: %#v", input)
+	}
+	model.BaseImageChannel = types.StringValue("test")
+	if input, _ := recipeVersionInput(context.Background(), model); input.BaseImageChannel != "test" {
+		t.Fatalf("channel not sent: %#v", input)
+	}
+	channel := "prod"
+	remote := recipeVersionFixture("RELEASED", nil)
+	remote.BaseImageChannel = &channel
+	if err := setRecipeVersionState(context.Background(), &model, remote); err != nil || model.BaseImageChannel.ValueString() != "prod" {
+		t.Fatalf("state channel = %v (%v)", model.BaseImageChannel, err)
+	}
+	remote.BaseImageChannel = nil
+	if err := setRecipeVersionState(context.Background(), &model, remote); err != nil || !model.BaseImageChannel.IsNull() {
+		t.Fatalf("a recipe outside the base entries has no channel: %v (%v)", model.BaseImageChannel, err)
 	}
 }
 

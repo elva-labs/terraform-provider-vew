@@ -76,6 +76,7 @@ func (r *recipeVersionResource) ModifyPlan(ctx context.Context, request resource
 		{"volume_size", !state.VolumeSize.IsUnknown() && !plan.VolumeSize.IsUnknown() && !state.VolumeSize.Equal(plan.VolumeSize)},
 		{"configured_components", !sameRecipeComponentSelection(ctx, state.ConfiguredComponents, plan.ConfiguredComponents)},
 		{"integrations", !state.Integrations.IsUnknown() && !plan.Integrations.IsUnknown() && !state.Integrations.Equal(plan.Integrations)},
+		{"base_image_channel", knownStringChange(state.BaseImageChannel, plan.BaseImageChannel)},
 	} {
 		if field.changed {
 			response.RequiresReplace = append(response.RequiresReplace, path.Root(field.name))
@@ -89,7 +90,8 @@ func knownStringChange(old, new types.String) bool {
 
 func equivalentRecipeVersionConfiguration(ctx context.Context, left, right recipeVersionModel) bool {
 	return left.Description.Equal(right.Description) && left.VolumeSize.Equal(right.VolumeSize) &&
-		left.Integrations.Equal(right.Integrations) && sameRecipeComponentSelection(ctx, left.ConfiguredComponents, right.ConfiguredComponents)
+		left.Integrations.Equal(right.Integrations) && !knownStringChange(left.BaseImageChannel, right.BaseImageChannel) &&
+		sameRecipeComponentSelection(ctx, left.ConfiguredComponents, right.ConfiguredComponents)
 }
 
 func sameRecipeComponentSelection(ctx context.Context, left, right types.List) bool {

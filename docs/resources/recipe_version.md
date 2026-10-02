@@ -12,6 +12,11 @@ an explicit `vew_recipe_version_release` action. Terraform delete retires the
 version. `configured_components` preserves the selected component versions;
 `effective_components` reflects VEW's resolved selection.
 
+On a recipe built on a base image entry, `base_image_channel` (`prod` or `test`)
+picks the release channel the parent image comes from; unset, VEW builds on
+`prod` and reports the channel. Like the other fields, changing it updates a
+release candidate and replaces a released version.
+
 ## Example Usage
 
 ```terraform
@@ -43,6 +48,7 @@ resource "vew_recipe_version" "example" {
 
 ### Optional
 
+- `base_image_channel` (String) Release channel of the base image the parent image comes from, prod or test. Only for recipes on a base image entry; VEW uses prod when unset.
 - `integrations` (Set of String)
 - `release_type` (String)
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))

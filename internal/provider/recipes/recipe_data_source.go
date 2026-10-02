@@ -125,6 +125,7 @@ type recipeVersionDataSourceModel struct {
 	Description          types.String `tfsdk:"description"`
 	VolumeSize           types.Int64  `tfsdk:"volume_size"`
 	Integrations         types.Set    `tfsdk:"integrations"`
+	BaseImageChannel     types.String `tfsdk:"base_image_channel"`
 	ConfiguredComponents types.List   `tfsdk:"configured_components"`
 	EffectiveComponents  types.List   `tfsdk:"effective_components"`
 	Name                 types.String `tfsdk:"name"`
@@ -155,6 +156,7 @@ func (d *recipeVersionDataSource) Schema(_ context.Context, _ datasource.SchemaR
 		"recipe_id":  schema.StringAttribute{Required: true}, "version_id": schema.StringAttribute{Required: true},
 		"description": schema.StringAttribute{Computed: true}, "volume_size": schema.Int64Attribute{Computed: true},
 		"integrations":          schema.SetAttribute{Computed: true, ElementType: types.StringType},
+		"base_image_channel":    schema.StringAttribute{Computed: true},
 		"configured_components": computedComponents(), "effective_components": computedComponents(),
 		"name": schema.StringAttribute{Computed: true}, "status": schema.StringAttribute{Computed: true},
 		"created_at": schema.StringAttribute{Computed: true}, "created_by": schema.StringAttribute{Computed: true},
@@ -219,6 +221,7 @@ func (d *recipeVersionDataSource) Read(ctx context.Context, request datasource.R
 		return
 	}
 	model.VolumeSize = types.Int64Value(volume)
+	model.BaseImageChannel = types.StringPointerValue(remote.BaseImageChannel)
 	integrations := remote.Integrations
 	if integrations == nil {
 		integrations = []string{}
