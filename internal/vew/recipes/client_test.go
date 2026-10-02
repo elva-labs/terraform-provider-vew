@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -340,5 +341,16 @@ func TestReleaseRecipeVersionRetriesAfterLostResponseWithoutCreateKey(t *testing
 	}
 	if calls != 2 {
 		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestRecipeVersionBaseImageChannelJSON(t *testing.T) {
+	body, err := json.Marshal(UpdateRecipeVersionInput{BaseImageChannel: "test"})
+	if err != nil || !strings.Contains(string(body), "\"baseImageChannel\":\"test\"") {
+		t.Fatalf("update body = %s (%v)", body, err)
+	}
+	var version RecipeVersion
+	if err := json.Unmarshal([]byte("{\"baseImageChannel\":\"prod\"}"), &version); err != nil || version.BaseImageChannel == nil || *version.BaseImageChannel != "prod" {
+		t.Fatalf("decoded channel = %v (%v)", version.BaseImageChannel, err)
 	}
 }

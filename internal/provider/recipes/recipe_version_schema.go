@@ -48,6 +48,7 @@ type recipeVersionModel struct {
 	ReleaseType          types.String `tfsdk:"release_type"`
 	VolumeSize           types.Int64  `tfsdk:"volume_size"`
 	Integrations         types.Set    `tfsdk:"integrations"`
+	BaseImageChannel     types.String `tfsdk:"base_image_channel"`
 	ConfiguredComponents types.List   `tfsdk:"configured_components"`
 	EffectiveComponents  types.List   `tfsdk:"effective_components"`
 	Name                 types.String `tfsdk:"name"`
@@ -75,6 +76,11 @@ func recipeVersionSchema() schema.Schema {
 		"volume_size":  schema.Int64Attribute{Required: true},
 		"integrations": schema.SetAttribute{Optional: true, Computed: true, ElementType: types.StringType,
 			Default: setdefault.StaticValue(types.SetValueMust(types.StringType, nil))},
+		// Unset, VEW builds a new version on prod and keeps an existing version's channel; recipes
+		// outside the base image entries have none.
+		"base_image_channel": schema.StringAttribute{Optional: true, Computed: true,
+			Description:   "Release channel of the base image the parent image comes from, prod or test. Only for recipes on a base image entry; VEW uses prod when unset.",
+			PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 		"configured_components": recipeComponentsAttribute(true),
 		"effective_components":  recipeComponentsAttribute(false),
 		"name":                  schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
@@ -132,6 +138,13 @@ func (r *recipeVersionResource) ValidateConfig(ctx context.Context, request reso
 		case "MAJOR", "MINOR", "PATCH":
 		default:
 			response.Diagnostics.AddAttributeError(path.Root("release_type"), "Invalid recipe version release type", "release_type must be MAJOR, MINOR, or PATCH.")
+		}
+	}
+	if !config.BaseImageChannel.IsUnknown() && !config.BaseImageChannel.IsNull() {
+		switch config.BaseImageChannel.ValueString() {
+		case "prod", "test":
+		default:
+			response.Diagnostics.AddAttributeError(path.Root("base_image_channel"), "Invalid base image channel", "base_image_channel must be prod or test.")
 		}
 	}
 	if !config.VolumeSize.IsUnknown() && !config.VolumeSize.IsNull() && (config.VolumeSize.ValueInt64() < 8 || config.VolumeSize.ValueInt64() > 500) {
@@ -220,7 +233,11 @@ func recipeVersionInput(ctx context.Context, model recipeVersionModel) (vewrecip
 		return vewrecipes.UpdateRecipeVersionInput{}, diagnostics
 	}
 	sort.Strings(integrations)
-	return vewrecipes.UpdateRecipeVersionInput{Components: components, Description: model.Description.ValueString(), VolumeSize: strconv.FormatInt(model.VolumeSize.ValueInt64(), 10), Integrations: integrations}, diagnostics
+	channel := ""
+	if !model.BaseImageChannel.IsNull() && !model.BaseImageChannel.IsUnknown() {
+		channel = model.BaseImageChannel.ValueString()
+	}
+	return vewrecipes.UpdateRecipeVersionInput{Components: components, Description: model.Description.ValueString(), VolumeSize: strconv.FormatInt(model.VolumeSize.ValueInt64(), 10), Integrations: integrations, BaseImageChannel: channel}, diagnostics
 }
 
 func validateRecipeTimeouts(ctx context.Context, timeouts types.Object) diag.Diagnostics {

@@ -21,19 +21,23 @@ type ComponentVersion struct {
 	Order         int64  `json:"order"`
 }
 
+// BaseImageChannel is omitted when empty: VEW then builds on prod (create) or keeps the
+// version's channel (update), and recipes outside the base image entries never send one.
 type CreateRecipeVersionInput struct {
-	Components   []ComponentVersion `json:"configuredComponentsVersions"`
-	Description  string             `json:"recipeVersionDescription"`
-	ReleaseType  string             `json:"recipeVersionReleaseType"`
-	VolumeSize   string             `json:"recipeVersionVolumeSize"`
-	Integrations []string           `json:"recipeVersionIntegrations"`
+	Components       []ComponentVersion `json:"configuredComponentsVersions"`
+	Description      string             `json:"recipeVersionDescription"`
+	ReleaseType      string             `json:"recipeVersionReleaseType"`
+	VolumeSize       string             `json:"recipeVersionVolumeSize"`
+	Integrations     []string           `json:"recipeVersionIntegrations"`
+	BaseImageChannel string             `json:"baseImageChannel,omitempty"`
 }
 
 type UpdateRecipeVersionInput struct {
-	Components   []ComponentVersion `json:"configuredComponentsVersions"`
-	Description  string             `json:"recipeVersionDescription"`
-	VolumeSize   string             `json:"recipeVersionVolumeSize"`
-	Integrations []string           `json:"recipeVersionIntegrations"`
+	Components       []ComponentVersion `json:"configuredComponentsVersions"`
+	Description      string             `json:"recipeVersionDescription"`
+	VolumeSize       string             `json:"recipeVersionVolumeSize"`
+	Integrations     []string           `json:"recipeVersionIntegrations"`
+	BaseImageChannel string             `json:"baseImageChannel,omitempty"`
 }
 
 // RecipeVersion preserves nil Components for historical versions whose
@@ -48,6 +52,7 @@ type RecipeVersion struct {
 	Name                string              `json:"recipeVersionName"`
 	VolumeSize          string              `json:"recipeVersionVolumeSize"`
 	Integrations        []string            `json:"recipeVersionIntegrations"`
+	BaseImageChannel    *string             `json:"baseImageChannel"`
 	Status              string              `json:"status"`
 	CreatedAt           string              `json:"createDate"`
 	CreatedBy           string              `json:"createdBy"`

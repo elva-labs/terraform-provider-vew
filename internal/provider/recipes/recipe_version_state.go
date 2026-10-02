@@ -35,6 +35,7 @@ func setRecipeVersionState(ctx context.Context, model *recipeVersionModel, remot
 		return errors.New("VEW recipe version returned invalid integrations")
 	}
 	model.Integrations = integrationSet
+	model.BaseImageChannel = types.StringPointerValue(remote.BaseImageChannel)
 	if model.ConfiguredComponents.IsNull() && remote.Components != nil {
 		configured, diagnostics := recipeComponentList(ctx, *remote.Components)
 		if diagnostics.HasError() {
