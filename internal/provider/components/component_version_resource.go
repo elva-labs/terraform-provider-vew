@@ -302,6 +302,11 @@ func (r *componentVersionResource) ModifyPlan(ctx context.Context, request resou
 		response.RequiresReplace = append(response.RequiresReplace, path.Root("release_type"))
 	}
 	if state.Status.IsUnknown() || state.Status.IsNull() || state.Status.ValueString() != "RELEASED" {
+		// VEW gives a release candidate a new name on every update (for example
+		// 1.0.0-rc.1 becomes 1.0.0-rc.2), so the name is only known after apply.
+		if !equivalentVersionConfiguration(ctx, state, plan) {
+			response.Diagnostics.Append(response.Plan.SetAttribute(ctx, path.Root("name"), types.StringUnknown())...)
+		}
 		return
 	}
 	// These local copies are only used to decide replacement. Keep configured
