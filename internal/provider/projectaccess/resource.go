@@ -156,7 +156,10 @@ func (r *accessResource) Metadata(_ context.Context, req resource.MetadataReques
 	}
 }
 func (r *accessResource) Schema(_ context.Context, _ resource.SchemaRequest, res *resource.SchemaResponse) {
-	attrs := map[string]schema.Attribute{"id": schema.StringAttribute{Computed: true}}
+	// The id never changes once known: without UseStateForUnknown an in-place update of the project
+	// plans it as unknown, and every resource keyed on project_id (RequiresReplace) plans a replacement.
+	stable := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
+	attrs := map[string]schema.Attribute{"id": schema.StringAttribute{Computed: true, PlanModifiers: stable}}
 	immutable := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	if r.kind == "project" {
 		attrs["name"] = schema.StringAttribute{Required: true}
@@ -174,7 +177,7 @@ func (r *accessResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			Computed:    true,
 			Description: "What the project's members get in the portal: \"full\", or \"workbench-only\" (members other than admins only see and launch their workbenches, from released versions). Unset keeps the current value; new projects are full.",
 		}
-		attrs["created_at"] = schema.StringAttribute{Computed: true}
+		attrs["created_at"] = schema.StringAttribute{Computed: true, PlanModifiers: stable}
 		attrs["updated_at"] = schema.StringAttribute{Computed: true}
 	} else {
 		attrs["project_id"] = schema.StringAttribute{Required: true, PlanModifiers: immutable}

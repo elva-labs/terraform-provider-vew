@@ -10,6 +10,7 @@ import (
 	api "github.com/elva-labs/terraform-provider-vew/internal/vew/projectaccess"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -281,6 +282,17 @@ func TestValidExperience(t *testing.T) {
 	for v, want := range map[string]bool{"full": true, "workbench-only": true, "kiosk": false, "": false} {
 		if validExperience(v) != want {
 			t.Errorf("validExperience(%q) = %v", v, !want)
+		}
+	}
+}
+func TestProjectIDIsStableAcrossUpdates(t *testing.T) {
+	r := &accessResource{kind: "project"}
+	var sr resource.SchemaResponse
+	r.Schema(context.Background(), resource.SchemaRequest{}, &sr)
+	for _, name := range []string{"id", "created_at"} {
+		attr, ok := sr.Schema.Attributes[name].(schema.StringAttribute)
+		if !ok || len(attr.PlanModifiers) == 0 {
+			t.Fatalf("%s must keep its state value on update (UseStateForUnknown)", name)
 		}
 	}
 }
