@@ -13,7 +13,6 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectsettings"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
-	"github.com/elva-labs/terraform-provider-vew/internal/vew/workbenchsizes"
 )
 
 // Data is shared by provider resources and data sources.
@@ -45,6 +44,4 @@ type Data struct {
 	RecipeVersionReads       recipes.RecipeVersionReadAPI
 	RecipeVersionReleases    recipes.RecipeVersionReleaseAPI
 	Waiter                   vew.Waiter
-	// WorkbenchSizes is nil unless provisioning_api_url is configured.
-	WorkbenchSizes workbenchsizes.API
 }
