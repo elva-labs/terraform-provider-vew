@@ -71,6 +71,7 @@ provider "vew" {}
 - `client_secret` (String, Sensitive)
 - `project_client_bootstrap` (Boolean) Request the client_assignment.bootstrap scope only for project client-assignment writes. Defaults to false; use with a separately granted platform recovery client.
 - `projects_api_url` (String)
+- `provisioning_api_url` (String) Provisioning S2S API (vew_program_member_sizes); or VEW_PROVISIONING_API_URL.
 - `publishing_api_url` (String)
 - `token_url` (String)
 
