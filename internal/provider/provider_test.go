@@ -44,7 +44,6 @@ func TestProviderSchema(t *testing.T) {
 		"api_url":                  true,
 		"projects_api_url":         true,
 		"publishing_api_url":       true,
-		"provisioning_api_url":     true,
 		"token_url":                true,
 		"client_id":                true,
 		"client_secret":            true,
@@ -231,7 +230,6 @@ func TestProviderConfigureDoesNotMakeNetworkRequests(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/packaging"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/projects"),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/publishing"),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -287,7 +285,6 @@ func TestProviderProjectsClientsUseSeparateScopesAndEndpoint(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -351,7 +348,6 @@ func TestProviderConfigureSetsProviderData(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, "https://configured.example/api"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, "https://configured.example/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -414,7 +410,6 @@ func TestProviderReleaseActionsUseOnlyReleaseScopes(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -469,7 +464,6 @@ func TestProviderPipelineUsesOnlyPipelineScopes(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -526,7 +520,6 @@ func TestProviderDataSourcesUseOnlyDomainReadScopes(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -596,7 +589,6 @@ func TestProviderImageBuildUsesSeparateExecuteAndReadScopes(t *testing.T) {
 			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
 			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
 			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
-			"provisioning_api_url":     tftypes.NewValue(tftypes.String, nil),
 			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
 			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
 			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
@@ -631,7 +623,7 @@ func TestProviderResourcesIncludesTechnologyAndProjectAccount(t *testing.T) {
 	t.Parallel()
 
 	resources := New("test")().Resources(context.Background())
-	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_project_management", "vew_project_workbench_lifecycle", "vew_base_image_release", "vew_mandatory_components_list", "vew_product", "vew_product_version_promotion", "vew_program_member_sizes"}
+	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_project_management", "vew_project_workbench_lifecycle", "vew_base_image_release", "vew_mandatory_components_list", "vew_product", "vew_product_version_promotion"}
 	if len(resources) != len(want) {
 		t.Fatalf("resource constructors = %d, want %d", len(resources), len(want))
 	}
@@ -762,7 +754,7 @@ func TestProviderClientAssignmentBootstrapScopeIsOptInAndIsolated(t *testing.T) 
 			var schemaResponse provider.SchemaResponse
 			p.Schema(context.Background(), provider.SchemaRequest{}, &schemaResponse)
 			request := provider.ConfigureRequest{Config: tfsdk.Config{Schema: schemaResponse.Schema, Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-				"api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"), "projects_api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"), "publishing_api_url": tftypes.NewValue(tftypes.String, nil), "provisioning_api_url": tftypes.NewValue(tftypes.String, nil), "token_url": tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"), "client_id": tftypes.NewValue(tftypes.String, "id"), "client_secret": tftypes.NewValue(tftypes.String, "secret"), "project_client_bootstrap": tftypes.NewValue(tftypes.Bool, tc.bootstrap),
+				"api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"), "projects_api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"), "publishing_api_url": tftypes.NewValue(tftypes.String, nil), "token_url": tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"), "client_id": tftypes.NewValue(tftypes.String, "id"), "client_secret": tftypes.NewValue(tftypes.String, "secret"), "project_client_bootstrap": tftypes.NewValue(tftypes.Bool, tc.bootstrap),
 			})}}
 			var response provider.ConfigureResponse
 			p.Configure(context.Background(), request, &response)
