@@ -19,6 +19,7 @@ import (
 	providerrecipes "github.com/elva-labs/terraform-provider-vew/internal/provider/recipes"
 	providerreleaseactions "github.com/elva-labs/terraform-provider-vew/internal/provider/releaseactions"
 	providertechnologies "github.com/elva-labs/terraform-provider-vew/internal/provider/technologies"
+	providerworkbenchsizes "github.com/elva-labs/terraform-provider-vew/internal/provider/workbenchsizes"
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/baseimages"
@@ -32,6 +33,7 @@ import (
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/projectsettings"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/recipes"
 	"github.com/elva-labs/terraform-provider-vew/internal/vew/technologies"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew/workbenchsizes"
 	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -51,6 +53,7 @@ type providerModel struct {
 	APIURL                 types.String `tfsdk:"api_url"`
 	ProjectsAPIURL         types.String `tfsdk:"projects_api_url"`
 	PublishingURL          types.String `tfsdk:"publishing_api_url"`
+	ProvisioningURL        types.String `tfsdk:"provisioning_api_url"`
 	TokenURL               types.String `tfsdk:"token_url"`
 	ClientID               types.String `tfsdk:"client_id"`
 	ClientSecret           types.String `tfsdk:"client_secret"`
@@ -74,6 +77,7 @@ func (p *vewProvider) Schema(_ context.Context, _ provider.SchemaRequest, respon
 			"api_url":                  schema.StringAttribute{Optional: true},
 			"projects_api_url":         schema.StringAttribute{Optional: true},
 			"publishing_api_url":       schema.StringAttribute{Optional: true},
+			"provisioning_api_url":     schema.StringAttribute{Optional: true, Description: "Provisioning S2S API (vew_program_member_sizes); or VEW_PROVISIONING_API_URL."},
 			"token_url":                schema.StringAttribute{Optional: true},
 			"client_id":                schema.StringAttribute{Optional: true},
 			"client_secret":            schema.StringAttribute{Optional: true, Sensitive: true},
@@ -240,6 +244,22 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		productAPI = products.NewClient(productWriteTransport, productReadTransport)
 		versionAPI = products.NewVersionClient(versionPromoteTransport, versionReadTransport)
 	}
+	var workbenchSizesAPI workbenchsizes.API
+	if config.ProvisioningAPIURL != "" {
+		provisioningConfig := config
+		provisioningConfig.APIURL = config.ProvisioningAPIURL
+		sizesWrite, err := vew.NewTransportWithScopes(provisioningConfig, "clients/provisioning/workbench_size.write")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW workbench sizes client", "The VEW workbench sizes write client could not be configured.")
+			return
+		}
+		sizesRead, err := vew.NewTransportWithScopes(provisioningConfig, "clients/provisioning/workbench_size.read")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW workbench sizes client", "The VEW workbench sizes read client could not be configured.")
+			return
+		}
+		workbenchSizesAPI = workbenchsizes.NewClient(sizesWrite, sizesRead)
+	}
 	baseImageWriteTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/base_image.write")
 	if err != nil {
 		response.Diagnostics.AddError("Unable to configure VEW base image client", "The VEW base image write client could not be configured.")
@@ -287,6 +307,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		BaseImages:               baseimages.NewClient(baseImageWriteTransport, baseImageReadTransport),
 		MandatoryComponents:      mandatorycomponents.NewClient(mandatoryComponentsWriteTransport, mandatoryComponentsReadTransport),
 		PublishingAPIURL:         config.PublishingAPIURL,
+		WorkbenchSizes:           workbenchSizesAPI,
 		Products:                 productAPI,
 		Pipelines:                pipelineAPI,
 		PipelineReads:            pipelineReadAPI,
@@ -373,6 +394,23 @@ func resolveProviderConfig(model providerModel, getenv func(string) (string, boo
 		}
 		config.PublishingAPIURL = publishingAPIURL
 	}
+	// Provisioning resources (vew_program_member_sizes) are optional in the same way.
+	if model.ProvisioningURL.IsUnknown() {
+		diagnostics.AddError("Unknown provider configuration", "provisioning_api_url must be known; configure it explicitly or through VEW_PROVISIONING_API_URL.")
+	} else {
+		provisioningAPIURL := ""
+		if !model.ProvisioningURL.IsNull() {
+			provisioningAPIURL = strings.TrimSpace(model.ProvisioningURL.ValueString())
+		}
+		if provisioningAPIURL == "" {
+			provisioningAPIURL, _ = getenv("VEW_PROVISIONING_API_URL")
+			provisioningAPIURL = strings.TrimSpace(provisioningAPIURL)
+		}
+		config.ProvisioningAPIURL = provisioningAPIURL
+	}
+	if config.ProvisioningAPIURL != "" && !validHTTPURL(config.ProvisioningAPIURL) {
+		diagnostics.AddError("Invalid provider configuration", "provisioning_api_url must be an absolute HTTP or HTTPS URL.")
+	}
 	if config.APIURL != "" && !validHTTPURL(config.APIURL) {
 		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTP or HTTPS URL.")
 	}
@@ -412,6 +450,7 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providermandatorycomponents.NewListResource,
 		providerproducts.NewProductResource,
 		providerproducts.NewProductVersionPromotionResource,
+		providerworkbenchsizes.NewResource,
 	}
 }
 

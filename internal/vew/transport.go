@@ -20,8 +20,8 @@ const clientResponseBodyLimit = 2 << 20
 // PublishingAPIURL are optional and are used only by Projects and Publishing
 // clients; APIURL continues to target Packaging.
 type Config struct {
-	APIURL, ProjectAPIURL, PublishingAPIURL, TokenURL, ClientID, ClientSecret string
-	ProjectClientBootstrap                                                    bool
+	APIURL, ProjectAPIURL, PublishingAPIURL, ProvisioningAPIURL, TokenURL, ClientID, ClientSecret string
+	ProjectClientBootstrap                                                                        bool
 }
 
 // Transport performs authenticated VEW HTTP requests.
