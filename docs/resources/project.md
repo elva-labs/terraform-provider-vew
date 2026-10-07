@@ -44,6 +44,7 @@ resource "vew_project" "example" {
 ### Optional
 
 - `description` (String)
+- `experience` (String) What the project's members get in the portal: "full", or "workbench-only" (members other than admins only see and launch their workbenches, from released versions). Unset keeps the current value; new projects are full.
 - `is_active` (Boolean)
 - `remote_support_enabled` (Boolean) Whether the project's support staff may ask to join its users' desktops (each request is accepted by the user). Unset keeps the current value; new projects allow it.
 
