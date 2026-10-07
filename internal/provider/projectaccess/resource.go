@@ -43,6 +43,7 @@ type model struct {
 	ProjectID     types.String `tfsdk:"project_id"`
 	UserID        types.String `tfsdk:"user_id"`
 	GroupID       types.String `tfsdk:"group_id"`
+	GroupName     types.String `tfsdk:"group_name"`
 	ClientID      types.String `tfsdk:"client_id"`
 	Name          types.String `tfsdk:"name"`
 	Description   types.String `tfsdk:"description"`
@@ -80,6 +81,7 @@ type groupModel struct {
 	ProjectID types.String `tfsdk:"project_id"`
 	GroupID   types.String `tfsdk:"group_id"`
 	Roles     types.Set    `tfsdk:"roles"`
+	GroupName types.String `tfsdk:"group_name"`
 }
 type clientModel struct {
 	ID        types.String `tfsdk:"id"`
@@ -122,6 +124,7 @@ func (r *accessResource) get(ctx context.Context, source modelReader) (model, di
 		m.ProjectID = v.ProjectID
 		m.GroupID = v.GroupID
 		m.Roles = v.Roles
+		m.GroupName = v.GroupName
 	case "client_assignment":
 		var v clientModel
 		d = source.Get(ctx, &v)
@@ -139,7 +142,7 @@ func (r *accessResource) set(ctx context.Context, state *tfsdk.State, m *model) 
 	case "assignment":
 		return state.Set(ctx, &userModel{m.ID, m.ProjectID, m.UserID, m.Roles, m.Email, m.DisplayName})
 	case "group_assignment":
-		return state.Set(ctx, &groupModel{m.ID, m.ProjectID, m.GroupID, m.Roles})
+		return state.Set(ctx, &groupModel{m.ID, m.ProjectID, m.GroupID, m.Roles, m.GroupName})
 	case "client_assignment":
 		return state.Set(ctx, &clientModel{m.ID, m.ProjectID, m.ClientID, m.Status})
 	}
@@ -190,6 +193,11 @@ func (r *accessResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 		case "group_assignment":
 			attrs["group_id"] = schema.StringAttribute{Required: true, PlanModifiers: immutable}
 			attrs["roles"] = schema.SetAttribute{Required: true, ElementType: types.StringType}
+			attrs["group_name"] = schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "The Entra group's display name, shown next to the grant in the portal. A label only: VEW matches the group by group_id. Unset keeps the stored name.",
+			}
 		case "client_assignment":
 			attrs["client_id"] = schema.StringAttribute{Required: true, PlanModifiers: immutable}
 			attrs["status"] = schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("ACTIVE")}
@@ -397,7 +405,7 @@ func (r *accessResource) Create(ctx context.Context, req resource.CreateRequest,
 		if res.Diagnostics.HasError() {
 			return
 		}
-		e := r.client.PutGroup(ctx, pid, target, api.GroupInput{Roles: rr})
+		e := r.client.PutGroup(ctx, pid, target, api.GroupInput{Roles: rr, GroupName: strPtr(m.GroupName)})
 		if e != nil {
 			addError(&res.Diagnostics, r.kind, "create", e, pid)
 			return
@@ -526,6 +534,11 @@ func (r *accessResource) refresh(ctx context.Context, m *model, state *tfsdk.Sta
 			return false
 		}
 		m.GroupID = types.StringValue(target)
+		if v.GroupName == nil {
+			m.GroupName = types.StringNull()
+		} else {
+			m.GroupName = types.StringValue(*v.GroupName)
+		}
 		roleSet, dummy := setRoles(ctx, v.Roles)
 		m.Roles = roleSet
 		d.Append(dummy...)
@@ -589,7 +602,7 @@ func (r *accessResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if res.Diagnostics.HasError() {
 			return
 		}
-		e = r.client.PutGroup(ctx, pid, target, api.GroupInput{Roles: rr})
+		e = r.client.PutGroup(ctx, pid, target, api.GroupInput{Roles: rr, GroupName: strPtr(m.GroupName)})
 	case "client_assignment":
 		e = r.client.ActivateClient(ctx, pid, target)
 	}

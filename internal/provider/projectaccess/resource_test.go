@@ -73,7 +73,7 @@ func (f *fakeAPI) UpdateUser(_ context.Context, _ string, _ string, in api.UserI
 func (f *fakeAPI) DeleteUser(context.Context, string, string) error { f.deleted++; return nil }
 func (f *fakeAPI) PutGroup(_ context.Context, pid, gid string, in api.GroupInput) error {
 	f.update++
-	f.group = api.GroupAssignment{ProjectID: pid, GroupID: gid, Roles: in.Roles}
+	f.group = api.GroupAssignment{ProjectID: pid, GroupID: gid, Roles: in.Roles, GroupName: in.GroupName}
 	return nil
 }
 func (f *fakeAPI) GetGroup(context.Context, string, string) (api.GroupAssignment, error) {
@@ -214,6 +214,29 @@ func TestProjectCreateRetainsAcceptedIDWhenReadFails(t *testing.T) {
 	d := out.State.Get(ctx, &got)
 	if !out.Diagnostics.HasError() || d.HasError() || got.ID.ValueString() != "proj-1" {
 		t.Fatalf("accepted ID lost: diagnostics=%v state=%#v state diagnostics=%v", out.Diagnostics, got, d)
+	}
+}
+
+func TestGroupNameIsSentAndRead(t *testing.T) {
+	ctx := context.Background()
+	gid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	name := "vew-shared-users"
+	groupAPI := &fakeAPI{group: api.GroupAssignment{ProjectID: "proj-1", GroupID: gid, Roles: []string{"PLATFORM_USER"}, GroupName: &name}}
+	group := &accessResource{kind: "group_assignment", client: groupAPI}
+	roles := types.SetValueMust(types.StringType, []attr.Value{types.StringValue("PLATFORM_USER")})
+	planned := state(t, group, &groupModel{ID: types.StringValue("proj-1/" + gid), ProjectID: types.StringValue("proj-1"), GroupID: types.StringValue(gid), Roles: roles, GroupName: types.StringValue(name)})
+	update := resource.UpdateResponse{State: planned}
+	group.Update(ctx, resource.UpdateRequest{Plan: tfsdk.Plan{Schema: planned.Schema, Raw: planned.Raw}, State: planned}, &update)
+	if update.Diagnostics.HasError() || groupAPI.group.GroupName == nil || *groupAPI.group.GroupName != name {
+		t.Fatalf("group_name not sent: %v %#v", update.Diagnostics, groupAPI.group)
+	}
+	unnamed := state(t, group, &groupModel{ID: types.StringValue("proj-1/" + gid), ProjectID: types.StringValue("proj-1"), GroupID: types.StringValue(gid), Roles: roles, GroupName: types.StringNull()})
+	read := resource.ReadResponse{State: unnamed}
+	group.Read(ctx, resource.ReadRequest{State: unnamed}, &read)
+	var got groupModel
+	read.State.Get(ctx, &got)
+	if read.Diagnostics.HasError() || got.GroupName.ValueString() != name {
+		t.Fatalf("group_name not read: %v %#v", read.Diagnostics, got)
 	}
 }
 

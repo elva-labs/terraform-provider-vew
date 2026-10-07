@@ -48,12 +48,14 @@ type UserAssignment struct {
 	DisplayName *string  `json:"userDisplayName"`
 }
 type GroupInput struct {
-	Roles []string `json:"roles"`
+	Roles     []string `json:"roles"`
+	GroupName *string  `json:"groupName,omitempty"`
 }
 type GroupAssignment struct {
 	ProjectID string   `json:"projectId"`
 	GroupID   string   `json:"groupId"`
 	Roles     []string `json:"roles"`
+	GroupName *string  `json:"groupName"`
 }
 type ClientAssignment struct {
 	ProjectID string `json:"projectId"`
