@@ -37,6 +37,9 @@ type imageBuildModel struct {
 	PipelineID     types.String `tfsdk:"pipeline_id"`
 	IdempotencyKey types.String `tfsdk:"idempotency_key"`
 	TimeoutMinutes types.Int64  `tfsdk:"timeout_minutes"`
+	// WaitForCompletion false returns once VEW accepted the build: the build continues in VEW and a
+	// long image build does not hold the Terraform run (or its agent) for hours.
+	WaitForCompletion types.Bool `tfsdk:"wait_for_completion"`
 }
 
 var _ action.ActionWithConfigure = (*imageBuildAction)(nil)
@@ -51,10 +54,11 @@ func (a *imageBuildAction) Schema(_ context.Context, _ action.SchemaRequest, res
 	response.Schema = schema.Schema{
 		Description: "Builds a VEW image from a pipeline and waits for it to be created. Use the same idempotency key when retrying an interrupted invocation.",
 		Attributes: map[string]schema.Attribute{
-			"project_id":      schema.StringAttribute{Required: true, Description: "Project containing the pipeline."},
-			"pipeline_id":     schema.StringAttribute{Required: true, Description: "Pipeline used to build the image."},
-			"idempotency_key": schema.StringAttribute{Required: true, Description: "Caller-supplied RFC 4122 UUID. Reuse it when retrying the same build."},
-			"timeout_minutes": schema.Int64Attribute{Optional: true, Description: "Maximum time to wait for image creation, in minutes. Defaults to 120."},
+			"project_id":          schema.StringAttribute{Required: true, Description: "Project containing the pipeline."},
+			"pipeline_id":         schema.StringAttribute{Required: true, Description: "Pipeline used to build the image."},
+			"idempotency_key":     schema.StringAttribute{Required: true, Description: "Caller-supplied RFC 4122 UUID. Reuse it when retrying the same build."},
+			"timeout_minutes":     schema.Int64Attribute{Optional: true, Description: "Maximum time to wait for image creation, in minutes. Defaults to 120. Ignored when wait_for_completion is false."},
+			"wait_for_completion": schema.BoolAttribute{Optional: true, Description: "Wait until the image is created (the default, true). With false the action returns once VEW has accepted the build; the build continues in VEW and its result is read from VEW (for example the product's versions) on a later run."},
 		},
 	}
 }
@@ -83,6 +87,15 @@ func (a *imageBuildAction) Invoke(ctx context.Context, request action.InvokeRequ
 	if model.IdempotencyKey.IsNull() || model.IdempotencyKey.IsUnknown() || !uuidPattern.MatchString(model.IdempotencyKey.ValueString()) {
 		response.Diagnostics.AddError("Invalid image build idempotency key", "idempotency_key must be a known RFC 4122 UUID.")
 		valid = false
+	}
+	wait := true
+	if !model.WaitForCompletion.IsNull() {
+		if model.WaitForCompletion.IsUnknown() {
+			response.Diagnostics.AddError("Invalid image build wait", "wait_for_completion must be known when the action is invoked.")
+			valid = false
+		} else {
+			wait = model.WaitForCompletion.ValueBool()
+		}
 	}
 	minutes := defaultTimeoutMinutes
 	if !model.TimeoutMinutes.IsNull() {
@@ -117,6 +130,10 @@ func (a *imageBuildAction) Invoke(ctx context.Context, request action.InvokeRequ
 	}
 	imageID := started.ID
 	sendProgress(response, "VEW image build reserved image "+displayID(imageID, key)+".")
+	if !wait {
+		sendProgress(response, "VEW image "+displayID(imageID, key)+" is building in VEW; not waiting for it (wait_for_completion = false).")
+		return
+	}
 
 	lastStatus := ""
 	upstreamID := ""

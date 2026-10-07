@@ -87,6 +87,9 @@ func testConfig(t *testing.T, values map[string]any) tfsdk.Config {
 		if name == "timeout_minutes" {
 			typ = tftypes.Number
 		}
+		if name == "wait_for_completion" {
+			typ = tftypes.Bool
+		}
 		raw[name] = tftypes.NewValue(typ, values[name])
 	}
 	return tfsdk.Config{Schema: response.Schema, Raw: tftypes.NewValue(response.Schema.Type().TerraformType(context.Background()), raw)}
@@ -148,6 +151,38 @@ func TestSchemaAndSuccessfulBuild(t *testing.T) {
 	want := []string{"VEW image build reserved image image.", "VEW image image status: CREATING.", "VEW image image status: CREATED.", "VEW image image created with upstream ID ami-123."}
 	if !reflect.DeepEqual(progress, want) {
 		t.Fatalf("progress = %#v, want %#v", progress, want)
+	}
+}
+
+func TestNoWaitReturnsAfterTheBuildIsAccepted(t *testing.T) {
+	client := &imageStub{
+		buildResult: images.ActionResult{ID: "image", RetryAfter: 3 * time.Second},
+		reads:       []images.Image{{ID: "image", Status: "CREATING"}},
+	}
+	waiter := &fastWaiter{}
+	values := validValues()
+	values["wait_for_completion"] = false
+	values["timeout_minutes"] = int64(180)
+	response, progress := runAction(t, client, waiter, values)
+	if response.Diagnostics.HasError() {
+		t.Fatalf("diagnostics: %v", response.Diagnostics)
+	}
+	if len(client.buildCalls) != 1 || len(client.readCalls) != 0 {
+		t.Fatalf("calls = %v %v, want one build and no reads", client.buildCalls, client.readCalls)
+	}
+	want := []string{"VEW image build reserved image image.", "VEW image image is building in VEW; not waiting for it (wait_for_completion = false)."}
+	if !reflect.DeepEqual(progress, want) {
+		t.Fatalf("progress = %#v, want %#v", progress, want)
+	}
+}
+
+func TestUnknownWaitNeverStartsBuild(t *testing.T) {
+	client := &imageStub{buildResult: images.ActionResult{ID: "image"}}
+	values := validValues()
+	values["wait_for_completion"] = tftypes.UnknownValue
+	response, _ := runAction(t, client, &fastWaiter{}, values)
+	if !response.Diagnostics.HasError() || len(client.buildCalls) != 0 {
+		t.Fatalf("want an error and no build, got %v / %v", response.Diagnostics, client.buildCalls)
 	}
 }
 
