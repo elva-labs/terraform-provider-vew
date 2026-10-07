@@ -252,3 +252,35 @@ func TestGroupRoleDriftAndClientRevocationRecovery(t *testing.T) {
 		t.Fatalf("client reactivation: %v %#v", restored.Diagnostics, clientAPI.client)
 	}
 }
+func TestProjectExperienceIsSentAndRead(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeAPI{}
+	r := &accessResource{kind: "project", client: f}
+	plan := state(t, r, &projectModel{ID: types.StringUnknown(), Name: types.StringValue("test"), Description: types.StringNull(), IsActive: types.BoolValue(true), RemoteSupport: types.BoolNull(), Experience: types.StringValue("workbench-only"), CreatedAt: types.StringUnknown(), UpdatedAt: types.StringUnknown()})
+	if in := r.projectInput(model{Name: types.StringValue("test"), IsActive: types.BoolValue(true), Experience: types.StringValue("workbench-only")}); in.Experience == nil || *in.Experience != "workbench-only" {
+		t.Fatalf("experience not sent: %#v", in)
+	}
+	if in := r.projectInput(model{Name: types.StringValue("test"), IsActive: types.BoolValue(true), Experience: types.StringUnknown()}); in.Experience != nil {
+		t.Fatalf("an unset experience must be omitted: %#v", in)
+	}
+	out := resource.CreateResponse{State: tfsdk.State{Schema: plan.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: tfsdk.Plan{Schema: plan.Schema, Raw: plan.Raw}}, &out)
+	if out.Diagnostics.HasError() {
+		t.Fatal(out.Diagnostics)
+	}
+	value := "workbench-only"
+	f.project.Experience = &value
+	read := resource.ReadResponse{State: out.State}
+	r.Read(ctx, resource.ReadRequest{State: out.State}, &read)
+	var got projectModel
+	if d := read.State.Get(ctx, &got); d.HasError() || got.Experience.ValueString() != "workbench-only" {
+		t.Fatalf("read experience: %v %#v", d, got)
+	}
+}
+func TestValidExperience(t *testing.T) {
+	for v, want := range map[string]bool{"full": true, "workbench-only": true, "kiosk": false, "": false} {
+		if validExperience(v) != want {
+			t.Errorf("validExperience(%q) = %v", v, !want)
+		}
+	}
+}

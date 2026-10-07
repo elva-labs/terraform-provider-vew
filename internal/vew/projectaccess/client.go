@@ -20,6 +20,8 @@ type ProjectInput struct {
 	IsActive    bool    `json:"isActive"`
 	// Omitted keeps the project's current value; a new project allows remote support.
 	RemoteSupportEnabled *bool `json:"remoteSupportEnabled,omitempty"`
+	// "full" or "workbench-only"; omitted keeps the project's current value (a new project is "full").
+	Experience *string `json:"experience,omitempty"`
 }
 type Project struct {
 	ID          string  `json:"projectId"`
@@ -27,9 +29,11 @@ type Project struct {
 	Description *string `json:"projectDescription"`
 	IsActive    bool    `json:"isActive"`
 	// Whether the project's support staff may ask to join its users' desktops; nil from older APIs.
-	RemoteSupportEnabled *bool  `json:"remoteSupportEnabled"`
-	CreatedAt            string `json:"createDate"`
-	UpdatedAt            string `json:"lastUpdateDate"`
+	RemoteSupportEnabled *bool `json:"remoteSupportEnabled"`
+	// What the project's members get in the portal; nil from older APIs.
+	Experience *string `json:"experience"`
+	CreatedAt  string  `json:"createDate"`
+	UpdatedAt  string  `json:"lastUpdateDate"`
 }
 type UserInput struct {
 	Roles       []string `json:"roles"`

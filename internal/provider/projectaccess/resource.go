@@ -48,6 +48,7 @@ type model struct {
 	Description   types.String `tfsdk:"description"`
 	IsActive      types.Bool   `tfsdk:"is_active"`
 	RemoteSupport types.Bool   `tfsdk:"remote_support_enabled"`
+	Experience    types.String `tfsdk:"experience"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 	UpdatedAt     types.String `tfsdk:"updated_at"`
 	Roles         types.Set    `tfsdk:"roles"`
@@ -62,6 +63,7 @@ type projectModel struct {
 	Description   types.String `tfsdk:"description"`
 	IsActive      types.Bool   `tfsdk:"is_active"`
 	RemoteSupport types.Bool   `tfsdk:"remote_support_enabled"`
+	Experience    types.String `tfsdk:"experience"`
 	CreatedAt     types.String `tfsdk:"created_at"`
 	UpdatedAt     types.String `tfsdk:"updated_at"`
 }
@@ -101,6 +103,7 @@ func (r *accessResource) get(ctx context.Context, source modelReader) (model, di
 		m.Description = v.Description
 		m.IsActive = v.IsActive
 		m.RemoteSupport = v.RemoteSupport
+		m.Experience = v.Experience
 		m.CreatedAt = v.CreatedAt
 		m.UpdatedAt = v.UpdatedAt
 	case "assignment":
@@ -132,7 +135,7 @@ func (r *accessResource) get(ctx context.Context, source modelReader) (model, di
 func (r *accessResource) set(ctx context.Context, state *tfsdk.State, m *model) diag.Diagnostics {
 	switch r.kind {
 	case "project":
-		return state.Set(ctx, &projectModel{m.ID, m.Name, m.Description, m.IsActive, m.RemoteSupport, m.CreatedAt, m.UpdatedAt})
+		return state.Set(ctx, &projectModel{m.ID, m.Name, m.Description, m.IsActive, m.RemoteSupport, m.Experience, m.CreatedAt, m.UpdatedAt})
 	case "assignment":
 		return state.Set(ctx, &userModel{m.ID, m.ProjectID, m.UserID, m.Roles, m.Email, m.DisplayName})
 	case "group_assignment":
@@ -164,6 +167,12 @@ func (r *accessResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			Optional:    true,
 			Computed:    true,
 			Description: "Whether the project's support staff may ask to join its users' desktops (each request is accepted by the user). Unset keeps the current value; new projects allow it.",
+		}
+		// Unset keeps the project's value (a new project is "full").
+		attrs["experience"] = schema.StringAttribute{
+			Optional:    true,
+			Computed:    true,
+			Description: "What the project's members get in the portal: \"full\", or \"workbench-only\" (members other than admins only see and launch their workbenches, from released versions). Unset keeps the current value; new projects are full.",
 		}
 		attrs["created_at"] = schema.StringAttribute{Computed: true}
 		attrs["updated_at"] = schema.StringAttribute{Computed: true}
@@ -206,6 +215,9 @@ func (r *accessResource) ValidateConfig(ctx context.Context, req resource.Valida
 		if known(m.Name) && strings.TrimSpace(m.Name.ValueString()) == "" {
 			res.Diagnostics.AddAttributeError(path.Root("name"), "Invalid project name", "name must be nonempty.")
 		}
+		if known(m.Experience) && !validExperience(m.Experience.ValueString()) {
+			res.Diagnostics.AddAttributeError(path.Root("experience"), "Invalid project experience", "experience must be \"full\" or \"workbench-only\".")
+		}
 		return
 	}
 	if known(m.ProjectID) && strings.TrimSpace(m.ProjectID.ValueString()) == "" {
@@ -231,7 +243,8 @@ func (r *accessResource) ValidateConfig(ctx context.Context, req resource.Valida
 		}
 	}
 }
-func known(v types.String) bool { return !v.IsNull() && !v.IsUnknown() }
+func known(v types.String) bool     { return !v.IsNull() && !v.IsUnknown() }
+func validExperience(v string) bool { return v == "full" || v == "workbench-only" }
 func parseImport(id string) (string, string, error) {
 	p := strings.Split(id, "/")
 	if len(p) != 2 || strings.TrimSpace(p[0]) != p[0] || strings.TrimSpace(p[1]) != p[1] || p[0] == "" || p[1] == "" {
@@ -303,6 +316,7 @@ func (r *accessResource) projectInput(m model) api.ProjectInput {
 		Description:          strPtr(m.Description),
 		IsActive:             m.IsActive.ValueBool(),
 		RemoteSupportEnabled: boolPtr(m.RemoteSupport),
+		Experience:           strPtr(m.Experience),
 	}
 }
 func roles(ctx context.Context, v types.Set) ([]string, diag.Diagnostics) {
@@ -459,6 +473,11 @@ func (r *accessResource) refresh(ctx context.Context, m *model, state *tfsdk.Sta
 			m.RemoteSupport = types.BoolNull()
 		} else {
 			m.RemoteSupport = types.BoolValue(*v.RemoteSupportEnabled)
+		}
+		if v.Experience == nil {
+			m.Experience = types.StringNull()
+		} else {
+			m.Experience = types.StringValue(*v.Experience)
 		}
 		m.CreatedAt = types.StringValue(v.CreatedAt)
 		m.UpdatedAt = types.StringValue(v.UpdatedAt)
