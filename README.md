@@ -73,8 +73,10 @@ Projects and access can be managed with `vew_project`,
 `vew_project_assignment`, `vew_project_group_assignment`, and
 `vew_project_client_assignment`. See the [project access guide](docs/guides/project-access.md)
 for scopes, import IDs, bootstrap, role resolution, and disposable validation.
-Recovery clients must explicitly set `project_client_bootstrap = true` on a
-separate provider alias; ordinary configurations leave it unset.
+Recovery clients explicitly invoke `vew_project_client_bootstrap` with
+`project_client_bootstrap = true` on a separate provider alias. The action
+assigns a different management client; normal assignment resources use that
+manager's credentials. Ordinary configurations leave recovery mode unset.
 
 Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and

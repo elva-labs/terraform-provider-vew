@@ -33,6 +33,15 @@ type Transport struct {
 	sleep       func(context.Context, time.Duration) error
 }
 
+// WithoutRetries shares authentication but disables transient retries.
+// Authentication refresh after a rejected 401 remains enabled. Bootstrap grants
+// cannot be replayed once a project stops being orphaned.
+func (t *Transport) WithoutRetries() *Transport {
+	copy := *t
+	copy.maxAttempts = 1
+	return &copy
+}
+
 // NewTransport constructs an authenticated transport from validated HTTP(S) endpoints.
 func NewTransport(config Config) (*Transport, error) {
 	return newTransport(config, oauthScope)

@@ -1,0 +1,34 @@
+---
+page_title: "vew_project_client_bootstrap Action - VEW"
+subcategory: ""
+description: |-
+  Grants a management client access to an existing orphaned VEW project.
+---
+
+# vew_project_client_bootstrap (Action)
+
+Explicitly grants a different management client access to an existing project
+with no active service-client assignments. Configure a recovery provider alias
+with `project_client_bootstrap = true` and the assignment-write and bootstrap
+scopes. The action validates the returned assignment, makes no subsequent GET,
+and has no managed resource state or destroy behavior.
+
+Declaring the action does not invoke it. Preview and invoke it with:
+
+```shell
+terraform plan -invoke=action.vew_project_client_bootstrap.manager
+terraform apply -invoke=action.vew_project_client_bootstrap.manager
+```
+
+After success, use the assigned management client's credentials for normal
+assignment resources. Never target the recovery client itself. Bootstrap is
+unavailable once any client has an active assignment. Uncertain requests are
+not automatically retried: verify the manager's assignment before another
+invocation. See the [project access guide](../guides/project-access.md) for
+migration and recovery.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}

@@ -35,8 +35,9 @@ var _ resource.ResourceWithImportState = (*accessResource)(nil)
 var _ resource.ResourceWithValidateConfig = (*accessResource)(nil)
 
 type accessResource struct {
-	kind   string
-	client api.API
+	kind     string
+	client   api.API
+	callerID string
 }
 type model struct {
 	ID            types.String `tfsdk:"id"`
@@ -206,7 +207,12 @@ func (r *accessResource) Configure(_ context.Context, req resource.ConfigureRequ
 		res.Diagnostics.AddError("Missing Projects API configuration", "Set projects_api_url or VEW_PROJECTS_API_URL to manage VEW project access.")
 		return
 	}
+	if r.kind == "client_assignment" && data.ProjectClientBootstrap {
+		res.Diagnostics.AddError("Use the bootstrap action for recovery", "Recovery credentials must use vew_project_client_bootstrap. Configure assignment resources with an already assigned management provider alias.")
+		return
+	}
 	r.client = data.ProjectAccess
+	r.callerID = data.ClientID
 }
 func (r *accessResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, res *resource.ValidateConfigResponse) {
 	m, ds := r.get(ctx, req.Config)
@@ -248,6 +254,14 @@ func (r *accessResource) ValidateConfig(ctx context.Context, req resource.Valida
 }
 func known(v types.String) bool     { return !v.IsNull() && !v.IsUnknown() }
 func validExperience(v string) bool { return v == "full" || v == "workbench-only" }
+func (r *accessResource) rejectSelfAssignment(m model, diagnostics *diag.Diagnostics) bool {
+	if r.kind == "client_assignment" && r.callerID != "" && m.ClientID.ValueString() == r.callerID {
+		diagnostics.AddAttributeError(path.Root("client_id"), "Self-assignment is forbidden", "A service client cannot create or reactivate its own project assignment. Use another assigned management client.")
+		return true
+	}
+	return false
+}
+
 func parseImport(id string) (string, string, error) {
 	p := strings.Split(id, "/")
 	if len(p) != 2 || strings.TrimSpace(p[0]) != p[0] || strings.TrimSpace(p[1]) != p[1] || p[0] == "" || p[1] == "" {
@@ -331,6 +345,9 @@ func (r *accessResource) Create(ctx context.Context, req resource.CreateRequest,
 	m, ds := r.get(ctx, req.Plan)
 	res.Diagnostics.Append(ds...)
 	if res.Diagnostics.HasError() {
+		return
+	}
+	if r.rejectSelfAssignment(m, &res.Diagnostics) {
 		return
 	}
 	if r.kind == "project" {
@@ -560,6 +577,9 @@ func (r *accessResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if res.Diagnostics.HasError() {
 		return
 	}
+	if r.rejectSelfAssignment(m, &res.Diagnostics) {
+		return
+	}
 	previous, ds := r.get(ctx, req.State)
 	res.Diagnostics.Append(ds...)
 	if res.Diagnostics.HasError() {
@@ -638,7 +658,7 @@ func addError(d *diag.Diagnostics, kind, op string, err error, pid string) {
 				suffix = ""
 			}
 			if kind == "client_assignment" && access == "write" {
-				suffix = ". For an orphaned project, use a separately configured platform recovery client with clients/projects/client_assignment.bootstrap"
+				suffix += ". For an orphaned project, explicitly invoke vew_project_client_bootstrap with a separate recovery provider alias; otherwise an assigned management client must grant access"
 			}
 			d.AddError(title, "The service client needs Projects scope clients/projects/"+scope+"."+access+suffix+". Check the OAuth grant and project access.")
 			return
