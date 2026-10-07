@@ -69,7 +69,7 @@ provider "vew" {}
 - `api_url` (String)
 - `client_id` (String)
 - `client_secret` (String, Sensitive)
-- `project_client_bootstrap` (Boolean) Request the client_assignment.bootstrap scope only for project client-assignment writes. Defaults to false; use with a separately granted platform recovery client.
+- `project_client_bootstrap` (Boolean) Enable the one-time vew_project_client_bootstrap action with separate platform recovery credentials. Defaults to false. Normal assignment resources must use an assigned management client.
 - `projects_api_url` (String)
 - `publishing_api_url` (String)
 - `token_url` (String)

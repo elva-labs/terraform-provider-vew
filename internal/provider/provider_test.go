@@ -672,10 +672,10 @@ func TestProviderActionsIncludesVersionReleasesAndImageBuild(t *testing.T) {
 		t.Fatal("provider does not implement provider.ProviderWithActions")
 	}
 	actions := providerWithActions.Actions(context.Background())
-	if len(actions) != 3 {
-		t.Fatalf("action constructors = %d, want 3", len(actions))
+	if len(actions) != 4 {
+		t.Fatalf("action constructors = %d, want 4", len(actions))
 	}
-	want := []string{"vew_component_version_release", "vew_recipe_version_release", "vew_image_build"}
+	want := []string{"vew_component_version_release", "vew_recipe_version_release", "vew_image_build", "vew_project_client_bootstrap"}
 	for index, constructor := range actions {
 		var response action.MetadataResponse
 		constructor().Metadata(context.Background(), action.MetadataRequest{ProviderTypeName: "vew"}, &response)
@@ -727,7 +727,7 @@ func TestProviderClientAssignmentBootstrapScopeIsOptInAndIsolated(t *testing.T) 
 		writeScope string
 	}{
 		{name: "normal", bootstrap: false, writeScope: "clients/projects/client_assignment.write"},
-		{name: "recovery", bootstrap: true, writeScope: "clients/projects/client_assignment.write clients/projects/client_assignment.bootstrap"},
+		{name: "recovery", bootstrap: true, writeScope: "clients/projects/client_assignment.write"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var scopes []string
@@ -760,6 +760,16 @@ func TestProviderClientAssignmentBootstrapScopeIsOptInAndIsolated(t *testing.T) 
 			p.Configure(context.Background(), request, &response)
 			assertNoDiagnostics(t, response.Diagnostics)
 			data := response.ResourceData.(providerdata.Data)
+			if data.ClientID != "id" || data.ProjectClientBootstrap != tc.bootstrap {
+				t.Fatal("caller identity or bootstrap opt-in was not propagated")
+			}
+			if tc.bootstrap {
+				if _, e := data.ProjectBootstrap.AssignClient(context.Background(), "proj-1", "client-1"); e != nil {
+					t.Fatal(e)
+				}
+			} else if data.ProjectBootstrap != nil {
+				t.Fatal("normal credentials configured a bootstrap client")
+			}
 			if e := data.ProjectAccess.ActivateClient(context.Background(), "proj-1", "client-1"); e != nil {
 				t.Fatal(e)
 			}
@@ -770,6 +780,9 @@ func TestProviderClientAssignmentBootstrapScopeIsOptInAndIsolated(t *testing.T) 
 				t.Fatal(e)
 			}
 			want := []string{tc.writeScope, "clients/projects/client_assignment.read", "clients/projects/program.read"}
+			if tc.bootstrap {
+				want = append([]string{"clients/projects/client_assignment.write clients/projects/client_assignment.bootstrap"}, want...)
+			}
 			if len(scopes) != len(want) {
 				t.Fatalf("requested scopes=%q, want=%q", scopes, want)
 			}

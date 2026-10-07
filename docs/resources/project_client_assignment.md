@@ -15,18 +15,15 @@ the project. Creation and updates activate the target client. A remotely
 `REVOKED` assignment appears as drift and can be restored to `ACTIVE` without
 changing its project or client identity.
 
+Use a management provider alias, separate from Packaging credentials, and
+target a different client. Self-assignment creation or reactivation is forbidden.
 Project creation automatically assigns the creating service client. For an
-existing orphaned project, configure a separate privileged provider alias
-whose client has `clients/projects/client_assignment.bootstrap`, and set
-`project_client_bootstrap = true` on that alias. This option adds bootstrap
-only to client-assignment write requests. Use it only when the project has no
-active client assignments; bootstrap cannot bypass an existing active one.
-Ordinary provider configurations leave it unset. Scope grants and client
-credentials must be configured on VEW before Terraform can make the request.
-Grant the recovery client **to itself first**. The resource reads the mapping
-after PUT, and that read requires an active assignment. Only then use the
-recovery alias to assign other clients. Keep the recovery client's seed
-assignment until managed resources have migrated to the normal provider.
+existing orphaned project, explicitly invoke the separate
+`vew_project_client_bootstrap` action with recovery credentials and
+`project_client_bootstrap = true`. This resource rejects recovery mode.
+The action grants a different manager access; normal resource reads and writes
+then use that manager's credentials. See the
+[project access guide](../guides/project-access.md) for the complete flow.
 
 Destroy revokes this project assignment and removes it from Terraform state.
 VEW retains the service client and its assignment record. Revoking the

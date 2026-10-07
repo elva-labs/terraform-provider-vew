@@ -77,7 +77,7 @@ func (p *vewProvider) Schema(_ context.Context, _ provider.SchemaRequest, respon
 			"token_url":                schema.StringAttribute{Optional: true},
 			"client_id":                schema.StringAttribute{Optional: true},
 			"client_secret":            schema.StringAttribute{Optional: true, Sensitive: true},
-			"project_client_bootstrap": schema.BoolAttribute{Optional: true, Description: "Request the client_assignment.bootstrap scope only for project client-assignment writes. Defaults to false; use with a separately granted platform recovery client."},
+			"project_client_bootstrap": schema.BoolAttribute{Optional: true, Description: "Enable the one-time vew_project_client_bootstrap action with separate platform recovery credentials. Defaults to false. Normal assignment resources must use an assigned management client."},
 		},
 	}
 }
@@ -142,6 +142,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	var projectAccountAPI projectaccounts.API
 	var projectAccountReads projectaccounts.ListAPI
 	var projectAccessAPI projectaccess.API
+	var projectBootstrapAPI projectaccess.BootstrapAPI
 	var projectSettingsAPI projectsettings.API
 	if config.ProjectAPIURL != "" {
 		projectsConfig := config
@@ -201,13 +202,14 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 			return
 		}
 		if config.ProjectClientBootstrap {
-			clientPair.Write, err = vew.NewTransportWithScopes(projectsConfig,
+			bootstrapTransport, bootstrapErr := vew.NewTransportWithScopes(projectsConfig,
 				"clients/projects/client_assignment.write",
 				"clients/projects/client_assignment.bootstrap")
-			if err != nil {
+			if bootstrapErr != nil {
 				response.Diagnostics.AddError("Unable to configure Projects bootstrap client", "The Projects client assignment bootstrap client could not be configured.")
 				return
 			}
+			projectBootstrapAPI = projectaccess.NewBootstrapClient(bootstrapTransport)
 		}
 		projectAccessAPI = projectaccess.NewClient(programPair, userPair, groupPair, clientPair)
 		projectSettingsAPI = projectsettings.NewClient(programPair.Write, programPair.Read)
@@ -283,6 +285,9 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 		ProjectAccounts:          projectAccountAPI,
 		ProjectAccountReads:      projectAccountReads,
 		ProjectAccess:            projectAccessAPI,
+		ProjectBootstrap:         projectBootstrapAPI,
+		ClientID:                 config.ClientID,
+		ProjectClientBootstrap:   config.ProjectClientBootstrap,
 		ProjectSettings:          projectSettingsAPI,
 		BaseImages:               baseimages.NewClient(baseImageWriteTransport, baseImageReadTransport),
 		MandatoryComponents:      mandatorycomponents.NewClient(mandatoryComponentsWriteTransport, mandatoryComponentsReadTransport),
@@ -435,5 +440,6 @@ func (p *vewProvider) Actions(context.Context) []func() action.Action {
 		providerreleaseactions.NewComponentVersionReleaseAction,
 		providerreleaseactions.NewRecipeVersionReleaseAction,
 		providerimageactions.NewImageBuildAction,
+		providerprojectaccess.NewBootstrapAction,
 	}
 }
