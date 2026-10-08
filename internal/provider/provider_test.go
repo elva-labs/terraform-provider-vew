@@ -195,9 +195,13 @@ func TestProviderConfig(t *testing.T) {
 		set  func(*providerModel)
 	}{
 		{"api_url", func(m *providerModel) { m.APIURL = types.StringValue("relative") }},
+		{"api_url", func(m *providerModel) { m.APIURL = types.StringValue("http://api.example.invalid") }},
 		{"projects_api_url", func(m *providerModel) { m.ProjectsAPIURL = types.StringValue("relative") }},
+		{"projects_api_url", func(m *providerModel) { m.ProjectsAPIURL = types.StringValue("http://projects.example.invalid") }},
 		{"publishing_api_url", func(m *providerModel) { m.PublishingURL = types.StringValue("relative") }},
+		{"publishing_api_url", func(m *providerModel) { m.PublishingURL = types.StringValue("http://publishing.example.invalid") }},
 		{"token_url", func(m *providerModel) { m.TokenURL = types.StringValue("ftp://example.invalid/token") }},
+		{"token_url", func(m *providerModel) { m.TokenURL = types.StringValue("http://auth.example.invalid/token") }},
 	} {
 		field := field
 		t.Run("invalid "+field.name+" URL", func(t *testing.T) {

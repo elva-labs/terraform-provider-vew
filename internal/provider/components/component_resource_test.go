@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/elva-labs/terraform-provider-vew/internal/providerdata"
+	"github.com/elva-labs/terraform-provider-vew/internal/vew"
 	vewcomponents "github.com/elva-labs/terraform-provider-vew/internal/vew/components"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -92,6 +93,28 @@ func TestComponentResourceConfigureRequiresProviderData(t *testing.T) {
 	r.Configure(context.Background(), resource.ConfigureRequest{ProviderData: providerdata.Data{Components: componentAPIStub{}}}, &response)
 	if r.client == nil {
 		t.Fatal("component API was not configured")
+	}
+}
+
+func TestComponentAPIDiagnosticFiltersUnsafeProblemMetadata(t *testing.T) {
+	const secret = "reflected-secret"
+	err := &vew.APIError{Status: 400, Problem: vew.Problem{
+		Code:      "BAD\n" + secret,
+		RequestID: "request\x1b[31m" + secret,
+	}}
+	diagnostic := componentAPIDiagnostic("read", err)
+	if !strings.Contains(diagnostic, "HTTP status 400") {
+		t.Fatalf("diagnostic = %q, want status", diagnostic)
+	}
+	if strings.Contains(diagnostic, secret) || strings.Contains(diagnostic, "BAD") || strings.Contains(diagnostic, "request") {
+		t.Fatalf("diagnostic exposed unsafe metadata: %q", diagnostic)
+	}
+
+	err.Problem.Code = "ACCESS_DENIED"
+	err.Problem.RequestID = "request-123"
+	diagnostic = componentAPIDiagnostic("read", err)
+	if !strings.Contains(diagnostic, "problem code ACCESS_DENIED") || !strings.Contains(diagnostic, "request ID request-123") {
+		t.Fatalf("diagnostic omitted safe metadata: %q", diagnostic)
 	}
 }
 

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"net/url"
 	"os"
 	"strings"
 
@@ -374,23 +373,22 @@ func resolveProviderConfig(model providerModel, getenv func(string) (string, boo
 		config.PublishingAPIURL = publishingAPIURL
 	}
 	if config.APIURL != "" && !validHTTPURL(config.APIURL) {
-		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTP or HTTPS URL.")
+		diagnostics.AddError("Invalid provider configuration", "api_url must be an absolute HTTPS URL or a loopback HTTP URL.")
 	}
 	if config.ProjectAPIURL != "" && !validHTTPURL(config.ProjectAPIURL) {
-		diagnostics.AddError("Invalid provider configuration", "projects_api_url must be an absolute HTTP or HTTPS URL.")
+		diagnostics.AddError("Invalid provider configuration", "projects_api_url must be an absolute HTTPS URL or a loopback HTTP URL.")
 	}
 	if config.PublishingAPIURL != "" && !validHTTPURL(config.PublishingAPIURL) {
-		diagnostics.AddError("Invalid provider configuration", "publishing_api_url must be an absolute HTTP or HTTPS URL.")
+		diagnostics.AddError("Invalid provider configuration", "publishing_api_url must be an absolute HTTPS URL or a loopback HTTP URL.")
 	}
 	if config.TokenURL != "" && !validHTTPURL(config.TokenURL) {
-		diagnostics.AddError("Invalid provider configuration", "token_url must be an absolute HTTP or HTTPS URL.")
+		diagnostics.AddError("Invalid provider configuration", "token_url must be an absolute HTTPS URL or a loopback HTTP URL.")
 	}
 	return config, diagnostics
 }
 
 func validHTTPURL(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
+	return vew.ValidEndpointURL(raw)
 }
 
 func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
