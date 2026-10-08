@@ -11,8 +11,10 @@ This proof-of-concept provider manages VEW components, component
 versions, recipes, recipe versions, image pipelines, project technologies, and
 AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
-`vew_recipe_version`, `vew_pipeline`, `vew_technology`, and
-`vew_project_account` resources.
+`vew_recipe_version`, `vew_pipeline`, `vew_technology`,
+`vew_project_account`, `vew_product`, `vew_product_version_promotion`,
+`vew_project_management`, `vew_project_workbench_lifecycle`, and
+`vew_base_image_release` resources.
 
 It also provides read-only data sources for components, versions, recipes,
 pipelines, and images, plus an explicitly invoked image-build action.
@@ -35,6 +37,7 @@ attribute is omitted or empty:
 | --- | --- | --- |
 | `api_url` | `VEW_API_URL` | Absolute VEW API HTTP(S) URL, including `/clients/packaging/v1` (the provider appends `/projects/...`) |
 | `projects_api_url` | `VEW_PROJECTS_API_URL` | Absolute VEW Projects API HTTP(S) URL (used by technologies and account assignments) |
+| `publishing_api_url` | `VEW_PUBLISHING_API_URL` | Absolute VEW Publishing API HTTP(S) URL (used by products) |
 | `token_url` | `VEW_TOKEN_URL` | Absolute OAuth token HTTP(S) URL |
 | `client_id` | `VEW_CLIENT_ID` | OAuth client ID |
 | `client_secret` | `VEW_CLIENT_SECRET` | OAuth client secret (sensitive) |
@@ -61,16 +64,28 @@ make test
 make build
 ```
 
+Pull requests into `main` and `beta` also run `make vet`, a `gofmt` check,
+`make docs-check`, and `make examples-check`, which validates every example
+under `examples/` against the provider built from the checkout (Terraform on
+`PATH`).
+
+Projects and access can be managed with `vew_project`,
+`vew_project_assignment`, `vew_project_group_assignment`, and
+`vew_project_client_assignment`. See the [project access guide](docs/guides/project-access.md)
+for scopes, import IDs, bootstrap, role resolution, and disposable validation.
+Recovery clients must explicitly set `project_client_bootstrap = true` on a
+separate provider alias; ordinary configurations leave it unset.
+
 Registry pages in `docs/` are generated from the live provider schema and
 `templates/`. After changing a schema or a template, run `make docs` and
 commit the resulting pages. Run `make docs-check` to regenerate into a
 temporary directory, compare every page, and validate the Registry layout.
 The GitHub Actions workflow runs this check and the Go test suite on pushes to
-`main` and pull requests targeting `main`, including forks. It uses Terraform
-1.16.3 and `tfplugindocs` v0.25.0. These jobs run on GitHub-hosted ARM runners
-without access to VEW credentials. Live acceptance tests remain separately
-gated. The historical design notes live in `design/superpowers/` so `docs/`
-contains only Registry pages.
+`main` and `beta`, and pull requests targeting either branch, including forks.
+It uses Terraform 1.16.3 and `tfplugindocs` v0.25.0. These jobs run on
+GitHub-hosted ARM runners without access to VEW credentials. Live acceptance
+tests remain separately gated. The historical design notes live in
+`design/superpowers/` so `docs/` contains only Registry pages.
 
 The equivalent commands are:
 
@@ -585,6 +600,43 @@ active. Examples are in
 and
 [`examples/resources/vew_project_account/resource.tf`](examples/resources/vew_project_account/resource.tf).
 
+## Publishing API resources
+
+The `vew_product` resource uses the Publishing API URL from
+`publishing_api_url` or `VEW_PUBLISHING_API_URL`. It needs an active
+assignment to the project and the `clients/publishing/product.read` and
+`clients/publishing/product.write` scopes. Import IDs are
+`project_id/product_id`. The product's `type` (`WORKBENCH`, `VIRTUAL_TARGET`,
+or `CONTAINER`) and `technology_id` are fixed; changing them replaces the
+product. Deleting it archives the product and unpublishes all of its versions.
+
+`vew_product_version_promotion` promotes a product version to `DEV`, `QA`, or
+`PROD` and waits until it is published in the stage's accounts. It needs
+`clients/publishing/version.read` and `clients/publishing/version.promote`.
+Import IDs are `project_id/product_id/version_id/stage`. Destroying it only
+removes it from Terraform; VEW does not undo a release. The
+`vew_product_versions` data source lists a product's versions and their stages
+with `clients/publishing/version.read`.
+
+## Project settings and base images
+
+`vew_project_management` marks a project as managed by an external tool
+(typically this configuration): VEW then refuses configuration changes made in
+the portal and points users to `source`. `vew_project_workbench_lifecycle` sets
+the project's workbench stop policy (always on, idle, nightly and weekend
+stops) and whether owners may change the nightly stop or their idle timeout
+within bounds. Both use `projects_api_url` with
+`clients/projects/program.read` and `clients/projects/program.write`, are
+singletons per project, and import by project ID; destroy returns the project
+to the portal or to the deployment's defaults.
+
+`vew_base_image_release` points a base-image channel (for example `test` or
+`prod` per architecture) at a build of the releasing project, which every
+project's recipes can build on. It needs `clients/packaging/base_image.read`
+and `clients/packaging/base_image.write`; VEW decides which project may
+release and which channel gates another. Import IDs are
+`architecture/channel`. Destroy only forgets the release.
+
 ## Data sources
 
 The provider reads existing components, component versions, recipes, recipe
@@ -611,16 +663,59 @@ Builds may incur AWS charges.
 See the [action guide](docs/actions/image_build.md) for invocation, timeout,
 and retry behavior and the [runnable example](examples/actions/image-build/README.md).
 
-## Release from main
+## Stable and beta releases
 
 The [release workflow](.github/workflows/release.yml) builds signed Terraform
-Registry assets from the current `main` commit. After the checks on `main`
-pass, start **Release provider** in GitHub Actions on the `main` branch and
-enter a new SemVer tag such as `v0.1.0`. The workflow reruns tests and the docs
-check on the same ARM Fargate Spot runner, creates the tag on that commit, then
-uses GoReleaser to publish a GitHub Release. It will not release a commit from
-another branch. Do not move or
-replace a published version tag; release a new version for corrections.
+Registry assets from the current `main` or `beta` commit. Start **Release
+provider** in GitHub Actions, select the branch in **Use workflow from**, and
+enter a new version tag:
+
+- On `main`, use a stable SemVer tag such as `v0.2.0`.
+- On `beta`, use a tag of the form `v0.2.0-beta.1`. Increment the beta number
+  for each subsequent release, such as `v0.2.0-beta.2`.
+
+The workflow rejects versions that do not match the branch and commits that
+are no longer the branch tip. It reruns tests and the docs check on a
+GitHub-hosted ARM runner, creates the tag on that commit, then uses GoReleaser
+to publish a GitHub Release. Beta releases keep the `-beta.N` version suffix
+and do not replace GitHub's latest stable release. The GitHub prerelease
+checkbox is left off during publication so the Terraform Registry can index
+the release. Terraform recognizes the beta from its version suffix and
+requires an exact version constraint to install it.
+
+After publication, confirm that the new version appears in the Registry and
+installs with `terraform init -upgrade`. If it is missing, use **Resync** in
+the provider's Registry settings with the GitHub prerelease checkbox still
+off. During publication of `v0.2.0-beta.1`, the Registry returned
+`Ignored draft release event` when the GitHub prerelease checkbox was enabled;
+the version was indexed after clearing it and resyncing. Once indexed, the
+GitHub prerelease checkbox can optionally be enabled. See the
+[reported Registry prerelease issue](https://discuss.hashicorp.com/t/publishing-pre-release-versions-of-provider-ignored-draft-release-event/69536).
+
+To graduate a beta, merge `beta` into `main` and publish the stable version,
+such as `v0.2.0`. Do not move or replace a published version tag; release a
+new version for corrections.
+
+Create `beta` from a commit containing this workflow before releasing from
+that branch. Both release types publish under the same `elva-labs/vew`
+provider address. Testers must opt in with an exact prerelease version:
+
+```hcl
+terraform {
+  required_providers {
+    vew = {
+      source  = "elva-labs/vew"
+      version = "= 0.2.0-beta.1"
+    }
+  }
+}
+```
+
+Run `terraform init -upgrade` after changing the version constraint to update
+the dependency lock file. Terraform excludes prereleases from ordinary
+version ranges. The Registry website can still show a higher-version beta
+as latest, even though Terraform requires an exact constraint to select it.
+See the [Terraform Registry prerelease FAQ](https://developer.hashicorp.com/terraform/registry/faq#can-i-prevent-prereleases-from-being-the-latest-version).
 
 Before the first run, configure repository Actions secrets `GPG_PRIVATE_KEY`
 and `PASSPHRASE` for an RSA or DSA release-signing key. Keep the private key

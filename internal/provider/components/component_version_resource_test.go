@@ -1062,3 +1062,33 @@ func diagnosticsContain(diagnostics diag.Diagnostics, want string) bool {
 	}
 	return false
 }
+
+func TestComponentVersionReleaseCandidateNameUnknownAfterUpdate(t *testing.T) {
+	r := &componentVersionResource{}
+	state := validComponentVersionModel(t)
+	state.Name = types.StringValue("1.0.0-rc.1")
+	for _, tc := range []struct {
+		name        string
+		description string
+		wantUnknown bool
+	}{
+		{"changed configuration", "new description", true},
+		{"unchanged configuration", "description", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := state
+			plan.Description = types.StringValue(tc.description)
+			response := modifyPlan(t, r, state, plan)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("modify plan diagnostics = %v", response.Diagnostics)
+			}
+			var name types.String
+			if diagnostics := response.Plan.GetAttribute(context.Background(), path.Root("name"), &name); diagnostics.HasError() {
+				t.Fatalf("read planned name diagnostics = %v", diagnostics)
+			}
+			if name.IsUnknown() != tc.wantUnknown {
+				t.Fatalf("planned name = %v, want unknown = %v", name, tc.wantUnknown)
+			}
+		})
+	}
+}

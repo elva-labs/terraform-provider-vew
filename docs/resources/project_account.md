@@ -23,6 +23,13 @@ Changing `project_id` or `aws_account_id` requires replacement. Changes to
 `name`, `description`, `account_type`, `technology_id`, `stage`, or `region`
 update the existing assignment in place and start re-onboarding.
 
+`onboarding_revision` re-runs onboarding without changing the configuration:
+set it to any new value (for example a date or the revision of the stacks VEW
+deploys into the account) and the next apply asks VEW to onboard the account
+again. VEW stores the value and never interprets it. Leaving the attribute unset,
+or removing it later, never triggers onboarding by itself. It needs a VEW version
+whose Projects API accepts `onboardingRevision`.
+
 Deleting this resource deactivates the VEW project assignment. It does not
 remove the AWS account, undo onboarding, or perform AWS offboarding. The account
 association remains retained by VEW and can keep its technology referenced.
@@ -68,12 +75,16 @@ provider "vew" {
 resource "vew_project_account" "example" {
   project_id     = var.project_id
   aws_account_id = var.aws_account_id
-  account_type  = "USER"
-  name          = "example-development-account"
-  description   = "Managed by Terraform"
-  technology_id = var.technology_id
-  stage         = "dev"
-  region        = "eu-west-1"
+  account_type   = "USER"
+  name           = "example-development-account"
+  description    = "Managed by Terraform"
+  technology_id  = var.technology_id
+  stage          = "dev"
+  region         = "eu-west-1"
+
+  # Optional: change it to onboard the account again with the same configuration, for example
+  # after the account stacks VEW deploys have changed.
+  onboarding_revision = "1"
 
   timeouts = {
     create = "2h"
@@ -102,6 +113,7 @@ resource "vew_project_account" "example" {
 
 ### Optional
 
+- `onboarding_revision` (String) Opaque revision of the account's onboarding. Changing it re-runs VEW's onboarding for the unchanged configuration, for example to roll out updated account stacks. Up to 128 letters, digits and `.`, `_`, `:` or `-`. Leaving it unset never triggers onboarding by itself.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only

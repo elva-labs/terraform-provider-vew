@@ -16,6 +16,7 @@ func preserveRecipeVersionMutableConfiguration(model *recipeVersionModel, prior 
 	model.Description = prior.Description
 	model.VolumeSize = prior.VolumeSize
 	model.Integrations = prior.Integrations
+	model.BaseImageChannel = prior.BaseImageChannel
 	model.ConfiguredComponents = prior.ConfiguredComponents
 }
 
@@ -111,6 +112,9 @@ func (r *recipeVersionResource) Update(ctx context.Context, request resource.Upd
 			return
 		}
 		model.Description, model.VolumeSize, model.Integrations, model.ConfiguredComponents = plan.Description, plan.VolumeSize, plan.Integrations, components
+		if !plan.BaseImageChannel.IsUnknown() {
+			model.BaseImageChannel = plan.BaseImageChannel
+		}
 		complete = true
 		if response.Private != nil {
 			response.Diagnostics.Append(response.Private.SetKey(stateCtx, recipeVersionUpdateRetryKey, nil)...)

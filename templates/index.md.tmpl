@@ -13,11 +13,13 @@ those images as products, and let developers launch ready-to-use workbenches.
 This helps teams provide consistent development and test environments without
 each developer having to assemble one from scratch.
 
-This provider brings VEW's **packaging** workflow into Terraform. It manages
+This provider brings VEW's **packaging and project access** workflows into Terraform. It manages
 components, component versions, recipes, recipe versions, and image pipelines;
 reads existing packaging objects; and offers explicit actions for releasing
-versions and building images. It also manages the project technologies and AWS
-account assignments needed for those workflows. The aim is to make workbench
+versions and building images. It also manages projects, direct user grants,
+Entra group grants, service-client grants, technologies, and AWS account
+assignments needed for those workflows, and the products that users launch
+from the built images. The aim is to make workbench
 image definitions repeatable and reviewable alongside other infrastructure.
 
 The provider requires the project-scoped S2S Packaging API with idempotency
@@ -25,14 +27,25 @@ support. See the [Packaging API prerequisite](guides/packaging-api.md) before
 connecting it to a VEW deployment.
 
 Provider configuration accepts OAuth client credentials in the arguments below
-or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`, `VEW_TOKEN_URL`,
-`VEW_CLIENT_ID`, and `VEW_CLIENT_SECRET` environment variables. `api_url`
-includes `/clients/packaging/v1`; `projects_api_url` points to the Projects
-API endpoint. The caller also needs an active assignment to the VEW project
+or the matching `VEW_API_URL`, `VEW_PROJECTS_API_URL`,
+`VEW_PUBLISHING_API_URL`, `VEW_TOKEN_URL`, `VEW_CLIENT_ID`, and
+`VEW_CLIENT_SECRET` environment variables. `api_url` includes
+`/clients/packaging/v1`; `projects_api_url` points to the Projects API
+endpoint and `publishing_api_url` to the Publishing API endpoint. The caller also needs an active assignment to the VEW project
 and the scopes required by each operation. Technologies need
 `clients/projects/technology.read` and
 `clients/projects/technology.write`; project account assignments need
-`clients/projects/account.read` and `clients/projects/account.write`.
+`clients/projects/account.read` and `clients/projects/account.write`;
+products need `clients/publishing/product.read` and
+`clients/publishing/product.write`; product version promotions need
+`clients/publishing/version.read` and `clients/publishing/version.promote`.
+Projects need `clients/projects/program.read|write`; direct users need
+`assignment.read|write`; Entra groups need `group_assignment.read|write`;
+service clients need `client_assignment.read|write`, all beneath
+`clients/projects/`. Project creation grants its creating client access.
+Existing projects require an active client assignment; a separately configured
+platform recovery client can use `client_assignment.bootstrap` for an orphaned
+project. See the [project access guide](guides/project-access.md).
 
 ## Example Usage
 
@@ -41,6 +54,8 @@ and the scopes required by each operation. Technologies need
 {{ .SchemaMarkdown | trimspace }}
 
 See the [data source guide](guides/data-sources.md) for read scopes and behavior.
+See the [project access guide](guides/project-access.md) for imports, role
+resolution, bootstrap, and a gated disposable validation flow.
 Project accounts onboard asynchronously and may wait up to two hours by
 default. Deleting one deactivates its VEW assignment and does not offboard the
 AWS account. Actions must be invoked explicitly; declaring them does not mutate

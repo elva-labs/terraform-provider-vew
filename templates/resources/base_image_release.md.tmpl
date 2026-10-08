@@ -1,0 +1,38 @@
+---
+page_title: "vew_base_image_release Resource - VEW"
+subcategory: ""
+description: |-
+  Releases an image to one of the deployment's base-image channels.
+---
+
+# vew_base_image_release (Resource)
+
+Points one of the deployment's base-image channels at an image. A deployment
+can configure channels per architecture (for example `test` and `prod`), each
+with an OS entry that every project's recipes can build on. The release is how
+a platform team ships a new golden image: VEW resolves a recipe's parent image
+from the channel when a recipe version is created, so projects adopt a new
+base with their next recipe version.
+
+VEW decides which project may release (the image must be one of its builds
+for that architecture) and which channel gates another: a `prod` release only
+takes an image that is or was released to `test`. Changing `image_id`
+releases the new image in place and keeps the replaced AMI as
+`previous_ami_id`, so a rollback is a release of the older image.
+
+Grant the provider client `clients/packaging/base_image.read` and
+`clients/packaging/base_image.write`, plus an active assignment to the
+releasing project. A base image is never withdrawn: destroy only removes the
+resource from state and leaves the channel as it is.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+```shell
+terraform import vew_base_image_release.prod amd64/prod
+```

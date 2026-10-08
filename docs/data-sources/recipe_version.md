@@ -54,6 +54,7 @@ output "effective_components" {
 
 ### Read-Only
 
+- `base_image_channel` (String)
 - `configured_components` (Attributes List) (see [below for nested schema](#nestedatt--configured_components))
 - `created_at` (String)
 - `created_by` (String)

@@ -41,11 +41,13 @@ func TestProviderSchema(t *testing.T) {
 	New("test")().Schema(context.Background(), provider.SchemaRequest{}, &response)
 
 	wantAttributes := map[string]bool{
-		"api_url":          true,
-		"projects_api_url": true,
-		"token_url":        true,
-		"client_id":        true,
-		"client_secret":    true,
+		"api_url":                  true,
+		"projects_api_url":         true,
+		"publishing_api_url":       true,
+		"token_url":                true,
+		"client_id":                true,
+		"client_secret":            true,
+		"project_client_bootstrap": true,
 	}
 	if len(response.Schema.Attributes) != len(wantAttributes) {
 		t.Fatalf("expected %d provider attributes, got %d", len(wantAttributes), len(response.Schema.Attributes))
@@ -111,12 +113,48 @@ func TestProviderConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("publishing API URL from environment", func(t *testing.T) {
+		got, diags := resolveProviderConfig(base, mapGetenv(map[string]string{"VEW_PUBLISHING_API_URL": "https://env.example/publishing"}))
+		assertNoDiagnostics(t, diags)
+		if got.PublishingAPIURL != "https://env.example/publishing" {
+			t.Fatalf("expected Publishing API URL from environment, got %q", got.PublishingAPIURL)
+		}
+	})
+
+	t.Run("publishing API URL explicit value takes precedence", func(t *testing.T) {
+		model := base
+		model.PublishingURL = types.StringValue("https://configured.example/publishing")
+		got, diags := resolveProviderConfig(model, mapGetenv(map[string]string{"VEW_PUBLISHING_API_URL": "https://env.example/publishing"}))
+		assertNoDiagnostics(t, diags)
+		if got.PublishingAPIURL != "https://configured.example/publishing" {
+			t.Fatalf("expected explicit Publishing API URL, got %q", got.PublishingAPIURL)
+		}
+	})
+
 	t.Run("projects API URL is optional", func(t *testing.T) {
 		got, diags := resolveProviderConfig(base, func(string) (string, bool) { return "", false })
 		assertNoDiagnostics(t, diags)
 		if got.ProjectAPIURL != "" {
 			t.Fatalf("expected absent Projects API URL, got %q", got.ProjectAPIURL)
 		}
+	})
+
+	t.Run("bootstrap requires explicit opt-in", func(t *testing.T) {
+		got, diags := resolveProviderConfig(base, func(string) (string, bool) { return "", false })
+		assertNoDiagnostics(t, diags)
+		if got.ProjectClientBootstrap {
+			t.Fatal("bootstrap scope enabled by default")
+		}
+		optedIn := base
+		optedIn.ProjectClientBootstrap = types.BoolValue(true)
+		got, diags = resolveProviderConfig(optedIn, func(string) (string, bool) { return "", false })
+		assertNoDiagnostics(t, diags)
+		if !got.ProjectClientBootstrap {
+			t.Fatal("bootstrap opt-in was ignored")
+		}
+		optedIn.ProjectClientBootstrap = types.BoolUnknown()
+		_, diags = resolveProviderConfig(optedIn, func(string) (string, bool) { return "", false })
+		assertDiagnosticContains(t, diags, "project_client_bootstrap")
 	})
 
 	t.Run("explicit values take precedence", func(t *testing.T) {
@@ -160,6 +198,8 @@ func TestProviderConfig(t *testing.T) {
 		{"api_url", func(m *providerModel) { m.APIURL = types.StringValue("http://api.example.invalid") }},
 		{"projects_api_url", func(m *providerModel) { m.ProjectsAPIURL = types.StringValue("relative") }},
 		{"projects_api_url", func(m *providerModel) { m.ProjectsAPIURL = types.StringValue("http://projects.example.invalid") }},
+		{"publishing_api_url", func(m *providerModel) { m.PublishingURL = types.StringValue("relative") }},
+		{"publishing_api_url", func(m *providerModel) { m.PublishingURL = types.StringValue("http://publishing.example.invalid") }},
 		{"token_url", func(m *providerModel) { m.TokenURL = types.StringValue("ftp://example.invalid/token") }},
 		{"token_url", func(m *providerModel) { m.TokenURL = types.StringValue("http://auth.example.invalid/token") }},
 	} {
@@ -191,11 +231,13 @@ func TestProviderConfigureDoesNotMakeNetworkRequests(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/packaging"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/projects"),
-			"token_url":        tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/packaging"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/projects"),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/publishing"),
+			"token_url":                tftypes.NewValue(tftypes.String, "http://127.0.0.1:1/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -203,6 +245,9 @@ func TestProviderConfigureDoesNotMakeNetworkRequests(t *testing.T) {
 	data, ok := response.ResourceData.(providerdata.Data)
 	if !ok || data.Technologies == nil || data.ProjectAccounts == nil || data.ProjectAPIURL != "http://127.0.0.1:1/projects" {
 		t.Fatalf("expected Projects clients to be configured without connecting, got %#v", response.ResourceData)
+	}
+	if data.Products == nil || data.Promotions == nil || data.ProductVersionReads == nil || data.PublishingAPIURL != "http://127.0.0.1:1/publishing" {
+		t.Fatalf("expected Publishing clients to be configured without connecting, got %#v", response.ResourceData)
 	}
 }
 
@@ -241,11 +286,13 @@ func TestProviderProjectsClientsUseSeparateScopesAndEndpoint(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"),
-			"token_url":        tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -302,11 +349,13 @@ func TestProviderConfigureSetsProviderData(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, "https://configured.example/api"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, nil),
-			"token_url":        tftypes.NewValue(tftypes.String, "https://configured.example/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, "https://configured.example/api"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, "https://configured.example/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -362,11 +411,13 @@ func TestProviderReleaseActionsUseOnlyReleaseScopes(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, server.URL+"/api"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, nil),
-			"token_url":        tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -414,11 +465,13 @@ func TestProviderPipelineUsesOnlyPipelineScopes(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, server.URL+"/api"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, nil),
-			"token_url":        tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -468,11 +521,13 @@ func TestProviderDataSourcesUseOnlyDomainReadScopes(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, server.URL+"/api"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, nil),
-			"token_url":        tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -535,11 +590,13 @@ func TestProviderImageBuildUsesSeparateExecuteAndReadScopes(t *testing.T) {
 	request := provider.ConfigureRequest{Config: tfsdk.Config{
 		Schema: schemaResponse.Schema,
 		Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
-			"api_url":          tftypes.NewValue(tftypes.String, server.URL+"/api"),
-			"projects_api_url": tftypes.NewValue(tftypes.String, nil),
-			"token_url":        tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
-			"client_id":        tftypes.NewValue(tftypes.String, "configured-client"),
-			"client_secret":    tftypes.NewValue(tftypes.String, "test-secret"),
+			"api_url":                  tftypes.NewValue(tftypes.String, server.URL+"/api"),
+			"projects_api_url":         tftypes.NewValue(tftypes.String, nil),
+			"publishing_api_url":       tftypes.NewValue(tftypes.String, nil),
+			"token_url":                tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"),
+			"client_id":                tftypes.NewValue(tftypes.String, "configured-client"),
+			"client_secret":            tftypes.NewValue(tftypes.String, "test-secret"),
+			"project_client_bootstrap": tftypes.NewValue(tftypes.Bool, nil),
 		})}}
 	var response provider.ConfigureResponse
 	p.Configure(context.Background(), request, &response)
@@ -570,10 +627,10 @@ func TestProviderResourcesIncludesTechnologyAndProjectAccount(t *testing.T) {
 	t.Parallel()
 
 	resources := New("test")().Resources(context.Background())
-	if len(resources) != 7 {
-		t.Fatalf("resource constructors = %d, want 7", len(resources))
+	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account", "vew_project", "vew_project_assignment", "vew_project_group_assignment", "vew_project_client_assignment", "vew_project_management", "vew_project_workbench_lifecycle", "vew_base_image_release", "vew_mandatory_components_list", "vew_product", "vew_product_version_promotion"}
+	if len(resources) != len(want) {
+		t.Fatalf("resource constructors = %d, want %d", len(resources), len(want))
 	}
-	want := []string{"vew_component", "vew_component_version", "vew_pipeline", "vew_recipe", "vew_recipe_version", "vew_technology", "vew_project_account"}
 	for index, constructor := range resources {
 		var response resource.MetadataResponse
 		constructor().Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "vew"}, &response)
@@ -596,6 +653,8 @@ func TestProviderDataSourcesIncludesExactSet(t *testing.T) {
 		"vew_image",
 		"vew_pipelines",
 		"vew_images",
+		"vew_product_versions",
+		"vew_project_accounts",
 	}
 	if len(dataSources) != len(want) {
 		t.Fatalf("data source constructors = %d, want %d", len(dataSources), len(want))
@@ -662,5 +721,67 @@ func assertDiagnosticsOmit(t *testing.T, diags diag.Diagnostics, secret string) 
 		if strings.Contains(diagnostic.Summary(), secret) || strings.Contains(diagnostic.Detail(), secret) {
 			t.Fatalf("diagnostic contains secret: %s", diagnostic.Detail())
 		}
+	}
+}
+
+func TestProviderClientAssignmentBootstrapScopeIsOptInAndIsolated(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bootstrap  bool
+		writeScope string
+	}{
+		{name: "normal", bootstrap: false, writeScope: "clients/projects/client_assignment.write"},
+		{name: "recovery", bootstrap: true, writeScope: "clients/projects/client_assignment.write clients/projects/client_assignment.bootstrap"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var scopes []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/oauth/token" {
+					_ = r.ParseForm()
+					scopes = append(scopes, r.Form.Get("scope"))
+					_, _ = fmt.Fprint(w, `{"access_token":"test-token","expires_in":3600}`)
+					return
+				}
+				switch r.Method + " " + r.URL.Path {
+				case "PUT /clients/projects/v1/projects/proj-1/clients/client-1":
+					_, _ = fmt.Fprint(w, `{"assignment":{"projectId":"proj-1","clientId":"client-1","status":"ACTIVE"}}`)
+				case "GET /clients/projects/v1/projects/proj-1/clients/client-1":
+					_, _ = fmt.Fprint(w, `{"assignment":{"projectId":"proj-1","clientId":"client-1","status":"ACTIVE"}}`)
+				case "GET /clients/projects/v1/projects/proj-1":
+					_, _ = fmt.Fprint(w, `{"projectId":"proj-1","projectName":"test","isActive":true}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			p := New("test")()
+			var schemaResponse provider.SchemaResponse
+			p.Schema(context.Background(), provider.SchemaRequest{}, &schemaResponse)
+			request := provider.ConfigureRequest{Config: tfsdk.Config{Schema: schemaResponse.Schema, Raw: tftypes.NewValue(schemaResponse.Schema.Type().TerraformType(context.Background()), map[string]tftypes.Value{
+				"api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/packaging/v1"), "projects_api_url": tftypes.NewValue(tftypes.String, server.URL+"/clients/projects/v1"), "publishing_api_url": tftypes.NewValue(tftypes.String, nil), "token_url": tftypes.NewValue(tftypes.String, server.URL+"/oauth/token"), "client_id": tftypes.NewValue(tftypes.String, "id"), "client_secret": tftypes.NewValue(tftypes.String, "secret"), "project_client_bootstrap": tftypes.NewValue(tftypes.Bool, tc.bootstrap),
+			})}}
+			var response provider.ConfigureResponse
+			p.Configure(context.Background(), request, &response)
+			assertNoDiagnostics(t, response.Diagnostics)
+			data := response.ResourceData.(providerdata.Data)
+			if e := data.ProjectAccess.ActivateClient(context.Background(), "proj-1", "client-1"); e != nil {
+				t.Fatal(e)
+			}
+			if _, e := data.ProjectAccess.GetClient(context.Background(), "proj-1", "client-1"); e != nil {
+				t.Fatal(e)
+			}
+			if _, e := data.ProjectAccess.GetProject(context.Background(), "proj-1"); e != nil {
+				t.Fatal(e)
+			}
+			want := []string{tc.writeScope, "clients/projects/client_assignment.read", "clients/projects/program.read"}
+			if len(scopes) != len(want) {
+				t.Fatalf("requested scopes=%q, want=%q", scopes, want)
+			}
+			for i := range want {
+				if scopes[i] != want[i] {
+					t.Fatalf("scope[%d]=%q, want=%q", i, scopes[i], want[i])
+				}
+			}
+		})
 	}
 }

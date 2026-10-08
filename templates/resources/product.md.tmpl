@@ -1,0 +1,48 @@
+---
+page_title: "vew_product Resource - VEW"
+subcategory: ""
+description: |-
+  Manages a VEW product in a project.
+---
+
+# vew_product (Resource)
+
+Manages a project product through the Publishing API. A product is what users
+launch: an image pipeline linked to it (`vew_pipeline.product_id`) adds a new
+product version in the DEV stage with every image it builds.
+
+The provider must be configured with `publishing_api_url` or
+`VEW_PUBLISHING_API_URL`; the caller needs an active assignment to the project
+and the `clients/publishing/product.read` and
+`clients/publishing/product.write` scopes. `technology_id` must name a
+technology of the project. Changes to `project_id`, `type`, and
+`technology_id` require replacement; changes to `name` and `description`
+update the product in place. Names allow 1 to 50 and descriptions up to 100
+letters, digits, spaces, hyphens, and underscores.
+
+`scope` is `PROGRAM` (the default: the project's own product) or `PLATFORM`.
+A platform product is created by the deployment's releasing project, built and
+promoted once there, and VEW distributes each version to every project's
+accounts at the stage it reaches; every project lists it. Only the releasing
+project may create one (VEW answers `409 RELEASING_PROJECT_ONLY` otherwise),
+and a change of `scope` requires replacement.
+
+Deleting the resource archives the product, which unpublishes every version of
+it from every account. Terraform waits until archiving finishes (30 minutes by
+default, configurable with `timeouts.delete`). VEW keeps archived products;
+the provider treats them as deleted. Use `lifecycle { prevent_destroy = true }`
+when Terraform should refuse a planned deletion or replacement.
+
+## Example Usage
+
+{{ tffile .ExampleFile }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an existing product with `project_id/product_id`:
+
+```shell
+terraform import vew_product.example project-example/prod-123
+```

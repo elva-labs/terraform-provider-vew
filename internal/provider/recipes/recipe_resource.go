@@ -93,18 +93,22 @@ func (r *recipeResource) ValidateConfig(ctx context.Context, request resource.Va
 			response.Diagnostics.AddAttributeError(path.Root(name), "Empty recipe value", name+" must be non-empty.")
 		}
 	}
-	if config.Platform.IsUnknown() || config.Architecture.IsUnknown() || config.OSVersion.IsUnknown() || config.Platform.IsNull() || config.Architecture.IsNull() || config.OSVersion.IsNull() {
+	if config.Platform.IsUnknown() || config.Architecture.IsUnknown() || config.Platform.IsNull() || config.Architecture.IsNull() {
 		return
 	}
-	platform, architecture, osVersion := config.Platform.ValueString(), config.Architecture.ValueString(), config.OSVersion.ValueString()
-	if !validRecipeSystem(platform, architecture, osVersion) {
-		response.Diagnostics.AddAttributeError(path.Root("platform"), "Unsupported recipe system configuration", "Use Linux with Ubuntu 24 and amd64 or arm64, or Windows with Microsoft Windows Server 2025 and amd64.")
+	platform, architecture := config.Platform.ValueString(), config.Architecture.ValueString()
+	if !validRecipeSystem(platform, architecture) {
+		response.Diagnostics.AddAttributeError(path.Root("platform"), "Unsupported recipe system configuration", "Use Linux with amd64 or arm64, or Windows with amd64.")
 	}
 }
 
-func validRecipeSystem(platform, architecture, osVersion string) bool {
-	return (platform == "Linux" && osVersion == "Ubuntu 24" && (architecture == "amd64" || architecture == "arm64")) ||
-		(platform == "Windows" && osVersion == "Microsoft Windows Server 2025" && architecture == "amd64")
+// validRecipeSystem checks only the platform and architecture pair. The OS version is not checked
+// here: a VEW deployment defines its OS entries in its system configuration mapping (for example a
+// custom base image next to the built-in Ubuntu and Windows entries), and the VEW API rejects
+// entries the deployment does not offer.
+func validRecipeSystem(platform, architecture string) bool {
+	return (platform == "Linux" && (architecture == "amd64" || architecture == "arm64")) ||
+		(platform == "Windows" && architecture == "amd64")
 }
 
 func (r *recipeResource) ImportState(ctx context.Context, request resource.ImportStateRequest, response *resource.ImportStateResponse) {

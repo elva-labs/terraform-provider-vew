@@ -82,7 +82,7 @@ func (r *recipeVersionResource) Create(ctx context.Context, request resource.Cre
 	}
 	action, err := r.client.CreateRecipeVersion(ctx, model.ProjectID.ValueString(), model.RecipeID.ValueString(), vewrecipes.CreateRecipeVersionInput{
 		Components: mutable.Components, Description: mutable.Description, ReleaseType: model.ReleaseType.ValueString(),
-		VolumeSize: mutable.VolumeSize, Integrations: mutable.Integrations,
+		VolumeSize: mutable.VolumeSize, Integrations: mutable.Integrations, BaseImageChannel: mutable.BaseImageChannel,
 	})
 	if err != nil {
 		addRecipeVersionError(&response.Diagnostics, "create", err, "")

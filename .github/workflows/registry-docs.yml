@@ -2,9 +2,9 @@ name: Checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, beta]
   push:
-    branches: [main]
+    branches: [main, beta]
 
 permissions:
   contents: read
@@ -52,3 +52,29 @@ jobs:
           fi
       - name: Run Go tests with the race detector
         run: go test ./... -race -count=1
+
+  static:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - name: Run go vet
+        run: go vet ./...
+      - name: Validate examples
+        run: python3 scripts/validate_examples.py
