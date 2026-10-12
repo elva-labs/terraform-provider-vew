@@ -162,7 +162,7 @@ func (r *promotionResource) Create(ctx context.Context, request resource.CreateR
 	var promotion vewproducts.Promotion
 	// PUT is an upsert: repeating it while VEW publishes returns the current
 	// state and never promotes twice.
-	err := r.waiter.Until(ctx, promotionTimeout(ctx, model.Timeouts), 0, func(ctx context.Context) (vew.PollResult, error) {
+	err := r.waiter.Until(ctx, promotionTimeout(ctx, model.Timeouts, defaultPromotionTimeout), 0, func(ctx context.Context) (vew.PollResult, error) {
 		current, err := r.client.PromoteVersion(ctx, projectID, productID, versionID, stage)
 		if err != nil {
 			return vew.PollResult{}, err
@@ -244,17 +244,18 @@ func (r *promotionResource) Delete(ctx context.Context, request resource.DeleteR
 	}
 }
 
-func promotionTimeout(ctx context.Context, timeouts types.Object) time.Duration {
+// promotionTimeout reads timeouts.create, falling back to fallback.
+func promotionTimeout(ctx context.Context, timeouts types.Object, fallback time.Duration) time.Duration {
 	if timeouts.IsNull() || timeouts.IsUnknown() {
-		return defaultPromotionTimeout
+		return fallback
 	}
 	var values promotionTimeoutsModel
 	if diagnostics := timeouts.As(ctx, &values, basetypes.ObjectAsOptions{}); diagnostics.HasError() || !known(values.Create) {
-		return defaultPromotionTimeout
+		return fallback
 	}
 	duration, err := time.ParseDuration(values.Create.ValueString())
 	if err != nil || duration <= 0 {
-		return defaultPromotionTimeout
+		return fallback
 	}
 	return duration
 }
