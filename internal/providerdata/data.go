@@ -29,6 +29,9 @@ type Data struct {
 	ProjectAccounts          projectaccounts.API
 	ProjectAccountReads      projectaccounts.ListAPI
 	ProjectAccess            projectaccess.API
+	ProjectBootstrap         projectaccess.BootstrapAPI
+	ClientID                 string
+	ProjectClientBootstrap   bool
 	ProjectSettings          projectsettings.API
 	BaseImages               baseimages.API
 	MandatoryComponents      mandatorycomponents.API

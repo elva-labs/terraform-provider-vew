@@ -27,55 +27,100 @@ are not automatically added by this provider. If the client lacks a scope or
 project access, the provider reports a sanitized diagnostic without relaying
 tokens, claims, or arbitrary backend error bodies.
 
+## Separate management and Packaging credentials
+
+CDK creates the Cognito clients and their credentials. Terraform consumes those
+credentials; it does not create OAuth clients. Use an assigned management
+provider alias for client assignments and separate Packaging credentials for
+components, recipes, and pipelines. Never grant the same client both
+`clients/projects/client_assignment.write` and `clients/packaging/*` scopes.
+A client may be assigned to multiple projects; credentials need not be created
+per project.
+
+The management client receives `program.read/write` and
+`client_assignment.read/write`. Its own project assignment is a prerequisite,
+not a self-seeding Terraform resource. Assignment PUT requests cannot target the
+configured caller, even when that caller already has access.
+
 ## First assignment for an existing project
 
 An existing orphaned project with **no active client assignments** needs a
-platform recovery client with
-`clients/projects/client_assignment.bootstrap`. Configure that client's
-credentials in a separate provider alias and set
-`project_client_bootstrap = true`. This adds the bootstrap scope only to that
-alias's client-assignment write requests. First grant the recovery client
-itself access to the orphaned project. The resource performs an exact read
-after the grant, which requires that active assignment. Then use the assigned
-recovery client to grant an ordinary automation client:
+platform recovery client with `clients/projects/client_assignment.write` and
+`clients/projects/client_assignment.bootstrap`. Use a separate action-only
+Terraform configuration and set `project_client_bootstrap = true` on its
+recovery provider alias:
 
 ```hcl
 provider "vew" {
-  alias            = "recovery"
-  api_url          = var.packaging_api_url
-  projects_api_url = var.projects_api_url
-  token_url        = var.token_url
-  client_id        = var.recovery_client_id
-  client_secret    = var.recovery_client_secret
+  alias                    = "recovery"
+  api_url                  = var.packaging_api_url
+  projects_api_url         = var.projects_api_url
+  token_url                = var.token_url
+  client_id                = var.recovery_client_id
+  client_secret            = var.recovery_client_secret
   project_client_bootstrap = true
 }
 
-resource "vew_project_client_assignment" "seed_recovery" {
-  provider   = vew.recovery
-  project_id = "proj-existing"
-  client_id  = var.recovery_client_id
-  status     = "ACTIVE"
-}
-
-resource "vew_project_client_assignment" "restore_automation" {
-  provider   = vew.recovery
-  project_id = "proj-existing"
-  client_id  = var.automation_client_id
-  status     = "ACTIVE"
-  depends_on = [vew_project_client_assignment.seed_recovery]
+action "vew_project_client_bootstrap" "manager" {
+  provider = vew.recovery
+  config {
+    project_id = var.project_id
+    client_id  = var.management_client_id
+  }
 }
 ```
 
-Grant bootstrap only to the recovery client in VEW. The normal provider leaves
-`project_client_bootstrap` unset and does not request that scope. Bootstrap
-cannot bypass an active assignment already present on a project; use an
-assigned client or resolve its access first. For a new `vew_project`, use the
-creating client's automatic assignment.
-Keep the recovery client's seed assignment until the ordinary client has
-access and any managed resources have migrated to a normal provider
-configuration. Revoking the recovery client's own assignment early prevents
-its exact reads and subsequent project operations. The dependency above also
-orders the two assignments during destroy; review that plan before applying.
+Preview and explicitly invoke the action:
+
+```shell
+terraform plan -invoke=action.vew_project_client_bootstrap.manager
+terraform apply -invoke=action.vew_project_client_bootstrap.manager
+```
+
+The action validates the PUT response's project ID, client ID, and `ACTIVE`
+status. It performs no recovery-client GET and has no refresh or destroy
+lifecycle. Declaring or removing the action does not grant or revoke access.
+Normal assignment resources reject recovery mode; the opt-in enables only this
+action's bootstrap scope.
+
+The recovery client must target a **different management client**. After the
+grant, switch to that manager's credentials for reads and ordinary assignments:
+
+```hcl
+provider "vew" {
+  alias            = "management"
+  api_url          = var.packaging_api_url
+  projects_api_url = var.projects_api_url
+  token_url        = var.token_url
+  client_id        = var.management_client_id
+  client_secret    = var.management_client_secret
+}
+
+resource "vew_project_client_assignment" "packaging" {
+  provider   = vew.management
+  project_id = var.project_id
+  client_id  = var.packaging_client_id
+  status     = "ACTIVE"
+}
+```
+
+Bootstrap does not authorize the recovery caller to read or revoke assignments.
+It cannot bypass any active assignment. A successful grant makes the project
+ineligible for another orphan bootstrap, so the provider does not automatically
+retry uncertain requests. After an interrupted request or invalid response,
+verify the target assignment using management credentials before retrying.
+A later `403` is not proof that the initial grant failed.
+
+For an existing project with active clients, an already assigned client with
+assignment-write access must grant the manager access. Provision and assign the
+manager before deploying scope removal from the old client. Verify its access,
+switch normal assignment resources to the management alias, and import existing
+Packaging assignments before managing them. Keep the manager's initial access
+outside the Packaging configuration so its destroy cannot remove the caller
+needed to finish resource cleanup.
+
+For a new `vew_project`, creating it with management credentials automatically
+assigns the manager; it can then grant Packaging access without bootstrap.
 
 ## Roles and identity
 
