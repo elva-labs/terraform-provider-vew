@@ -213,6 +213,7 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	}
 	var productAPI products.API
 	var versionAPI *products.VersionClient
+	var retirementAPI *products.RetirementClient
 	if config.PublishingAPIURL != "" {
 		publishingConfig := config
 		publishingConfig.APIURL = config.PublishingAPIURL
@@ -236,8 +237,16 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 			response.Diagnostics.AddError("Unable to configure VEW product version client", "The VEW product version read client could not be configured.")
 			return
 		}
+		// Tokens are fetched per scope on first use, so a client without version.retire still manages
+		// products and promotions.
+		versionRetireTransport, err := vew.NewTransportWithScopes(publishingConfig, "clients/publishing/version.retire")
+		if err != nil {
+			response.Diagnostics.AddError("Unable to configure VEW product version client", "The VEW product version retire client could not be configured.")
+			return
+		}
 		productAPI = products.NewClient(productWriteTransport, productReadTransport)
 		versionAPI = products.NewVersionClient(versionPromoteTransport, versionReadTransport)
+		retirementAPI = products.NewRetirementClient(versionRetireTransport, versionReadTransport)
 	}
 	baseImageWriteTransport, err := vew.NewTransportWithScopes(config, "clients/packaging/base_image.write")
 	if err != nil {
@@ -298,6 +307,9 @@ func (p *vewProvider) Configure(ctx context.Context, request provider.ConfigureR
 	}
 	if versionAPI != nil {
 		data.Promotions, data.ProductVersionReads = versionAPI, versionAPI
+	}
+	if retirementAPI != nil {
+		data.Retirements = retirementAPI
 	}
 	response.ResourceData = data
 	response.DataSourceData = data
@@ -410,6 +422,7 @@ func (p *vewProvider) Resources(context.Context) []func() resource.Resource {
 		providermandatorycomponents.NewListResource,
 		providerproducts.NewProductResource,
 		providerproducts.NewProductVersionPromotionResource,
+		providerproducts.NewProductVersionRetirementResource,
 	}
 }
 
