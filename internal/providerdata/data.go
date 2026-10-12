@@ -35,6 +35,7 @@ type Data struct {
 	PublishingAPIURL         string
 	Products                 products.API
 	Promotions               products.PromotionAPI
+	Retirements              products.RetirementAPI
 	ProductVersionReads      products.VersionReadAPI
 	Pipelines                pipelines.API
 	PipelineReads            pipelines.ReadAPI

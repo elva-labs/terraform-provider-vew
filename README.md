@@ -13,7 +13,7 @@ AWS account assignments. It uses the VEW OAuth 2.0 client-credentials flow
 and exposes the `vew_component`, `vew_component_version`, `vew_recipe`,
 `vew_recipe_version`, `vew_pipeline`, `vew_technology`,
 `vew_project_account`, `vew_product`, `vew_product_version_promotion`,
-`vew_project_management`, `vew_project_workbench_lifecycle`, and
+`vew_product_version_retirement`, `vew_project_management`, `vew_project_workbench_lifecycle`, and
 `vew_base_image_release` resources.
 
 It also provides read-only data sources for components, versions, recipes,

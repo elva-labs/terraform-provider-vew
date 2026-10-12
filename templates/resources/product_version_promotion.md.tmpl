@@ -26,7 +26,7 @@ still publishing when the timeout expires stays in state and is reconciled by
 the next apply. All arguments force replacement.
 
 Destroying the resource only removes it from Terraform: VEW does not undo a
-release. Retire a version in VEW to withdraw it.
+release. Retire a version with `vew_product_version_retirement` to withdraw it.
 
 ## Example Usage
 
