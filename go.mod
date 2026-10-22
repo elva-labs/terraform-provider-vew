@@ -1,6 +1,6 @@
 module github.com/elva-labs/terraform-provider-vew
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
